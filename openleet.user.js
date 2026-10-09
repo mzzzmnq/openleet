@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.0.0
+// @version      2.1.0
 // @description  在 LeetCode 题目页嵌入 OpenCode Go 模型的对话面板：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你的 OpenCode Go key，不依赖任何本地服务。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
