@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>openleet · 离线演示</title>
+    <style>
+      body { margin: 0; font: 15px/1.7 -apple-system, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif; background: #f5f6f8; color: #20242c; }
+      .wrap { max-width: 860px; margin: 0 auto; padding: 28px 20px 120px; }
+      .banner { background: linear-gradient(135deg, #5b7cfa, #8a5cf6); color: #fff; border-radius: 14px; padding: 16px 18px; margin-bottom: 22px; }
+      .banner h1 { margin: 0 0 6px; font-size: 18px; }
+      .banner p { margin: 0; font-size: 13px; opacity: 0.92; }
+      .banner code { background: rgba(255, 255, 255, 0.22); padding: 1px 6px; border-radius: 6px; }
+      .card { background: #fff; border: 1px solid #e3e6ec; border-radius: 12px; padding: 18px 20px; }
+      .title { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 17px; margin-bottom: 4px; }
+      .diff { font-size: 12px; padding: 2px 8px; border-radius: 8px; background: #e8f7ee; color: #1f9d55; font-weight: 600; }
+      .tags { display: flex; gap: 8px; margin: 10px 0 16px; flex-wrap: wrap; }
+      .tag { font-size: 12px; background: #eef0f5; color: #4b5563; border-radius: 999px; padding: 3px 10px; text-decoration: none; }
+      .desc p { margin: 8px 0; font-size: 14px; color: #333a45; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="banner">
+        <h1>openleet · 离线演示</h1>
+        <p>
+          这个页面用一个假的题目 DOM + 假的 Monaco 编辑器，并注入一套<strong>假的油猴 API</strong>
+          （`GM_xmlhttpRequest` 返回预置的流式回答），用来离线预览面板。右下角点
+          <code>⌘ AI 助手</code> 试试。<br />
+          必须以带 <code>?ocleet=1</code> 的地址打开；真实使用时不需要这个页面。
+        </p>
+      </div>
+
+      <div class="card">
+        <div class="title">
+          <span data-cy="question-title">1. Two Sum</span>
+          <span class="diff"><span class="text-difficulty-easy">Easy</span></span>
+        </div>
+        <div class="tags">
+          <a class="tag" href="/tag/array/">数组</a>
+          <a class="tag" href="/tag/hash-table/">哈希表</a>
+        </div>
+        <div class="desc" data-track-load="description_content">
+          <p>给定一个整数数组 <code>nums</code> 和一个整数目标值 <code>target</code>，请你在该数组中找出和为目标值 <code>target</code> 的那两个整数，并返回它们的数组下标。</p>
+          <p>你可以假设每种输入只会对应一个答案。但是，数组中同一个元素在答案里不能重复出现。</p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      // ---- fake Monaco ----
+      window.monaco = {
+        editor: {
+          getModels: function () {
+            return [
+              {
+                getLanguageId: function () { return "cpp"; },
+                getValue: function () {
+                  return "class Solution {\npublic:\n    vector<int> twoSum(vector<int>& nums, int target) {\n        for (int i = 0; i < nums.size(); i++)\n            for (int j = i + 1; j < nums.size(); j++)\n                if (nums[i] + nums[j] == target) return {i, j};\n        return {};\n    }\n};";
+                },
+              },
+            ];
+          },
+        },
+      };
+
+      // ---- fake Tampermonkey APIs: canned streaming reply, no network ----
+      (function () {
+        window.unsafeWindow = window;
+        window.GM_getValue = (k, d) => {
+          const v = localStorage.getItem("gm:" + k);
+          return v == null ? d : JSON.parse(v);
+        };
+        window.GM_setValue = (k, v) => localStorage.setItem("gm:" + k, JSON.stringify(v));
+        window.GM_addStyle = (css) => {
+          const s = document.createElement("style");
+          s.textContent = css;
+          document.head.appendChild(s);
+          return s;
+        };
+
+        const REPLY = [
+          "思路：用哈希表把「找配对」变成一次遍历 O(n)。",
+          "",
+          "```cpp",
+          "vector<int> twoSum(vector<int>& nums, int target) {",
+          "    unordered_map<int,int> seen;",
+          "    for (int i = 0; i < (int)nums.size(); i++) {",
+          "        auto it = seen.find(target - nums[i]);",
+          "        if (it != seen.end()) return {it->second, i};",
+          "        seen[nums[i]] = i;",
+          "    }",
+          "    return {};",
+          "}",
+          "```",
+          "",
+          "- 时间 O(n)：每个元素只查/插一次。",
+          "- 空间 O(n)：哈希表最多存 n 个数。",
+        ].join("\n");
+
+        window.GM_xmlhttpRequest = function (opts) {
+          const url = String(opts.url || "");
+          const details = { responseText: "", readyState: 4 };
+          const fire = (name) => { try { opts[name] && opts[name](details); } catch (e) { opts.onerror && opts.onerror(e); } };
+
+          if (/\/usage$/.test(url)) {
+            setTimeout(() => { details.status = 200; fire("onload"); }, 100);
+            return;
+          }
+          if (!/\/chat\/completions$/.test(url)) {
+            setTimeout(() => { details.status = 404; fire("onload"); }, 0);
+            return;
+          }
+
+          // Emit a fake SSE stream: a little reasoning, then the answer in chunks.
+          const events = [
+            { choices: [{ delta: { reasoning_content: "用户问的是两数之和的最优解法。" } }] },
+            { choices: [{ delta: { reasoning_content: "用哈希表一次遍历即可。" } }] },
+            { choices: [{ delta: { content: REPLY.slice(0, 30) } }] },
+            { choices: [{ delta: { content: REPLY.slice(30, 120) } }] },
+            { choices: [{ delta: { content: REPLY.slice(120) } }] },
+          ];
+          let i = 0;
+          const tick = () => {
+            if (i < events.length) {
+              details.responseText += "data: " + JSON.stringify(events[i++]) + "\n\n";
+              fire("onprogress");
+              setTimeout(tick, 350);
+            } else {
+              details.responseText += "data: [DONE]\n\n";
+              details.status = 200;
+              fire("onload");
+            }
+          };
+          setTimeout(tick, 300);
+        };
+
+        // Pre-seed a key so the script will attempt the (faked) request.
+        localStorage.setItem(
+          "gm:config",
+          JSON.stringify({
+            apiKey: "demo-offline-key",
+            baseUrl: "https://opencode.ai/zen/go/v1",
+            model: "deepseek-v4.1-flash",
+            includeCode: true,
+            autoRead: true,
+            mode: "hint",
+          }),
+        );
+      })();
+    </script>
+    <script src="./openleet.user.js"></script>
+  </body>
+</html>

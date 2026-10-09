@@ -1,0 +1,7 @@
+# dependencies / noise (this project has none, it's a single userscript)
+node_modules/
+
+# local
+*.log
+.DS_Store
+Thumbs.db
