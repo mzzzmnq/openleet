@@ -14,6 +14,8 @@
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
 // @connect      opencode.ai
+// @connect      127.0.0.1
+// @connect      localhost
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -106,6 +108,10 @@
     includeCode: true,
     autoRead: true,
     mode: "hint",
+    // ---- 导出到 LeetNote ----
+    leetnoteUrl: "http://127.0.0.1:8080",
+    leetnoteToken: "",
+    includeAi: true,
   };
   const cfg = { ...DEFAULTS, ...(store.get("config") || {}) };
   const saveCfg = () => store.set("config", cfg);
@@ -578,6 +584,9 @@
       <label class="ocleet-field"><span>模型</span><select data-ocleet="model"></select></label>
       <label class="ocleet-check"><input type="checkbox" data-ocleet="include-code" /><span>把当前编辑器里的代码发给模型</span></label>
       <label class="ocleet-check"><input type="checkbox" data-ocleet="auto-read" /><span>打开面板时自动读取题目</span></label>
+      <label class="ocleet-field"><span>LeetNote 地址</span><input type="text" data-ocleet="leetnote-url" placeholder="http://127.0.0.1:8080" /></label>
+      <label class="ocleet-field"><span>LeetNote 令牌（ln_…）</span><input type="password" data-ocleet="leetnote-token" placeholder="ln_…" autocomplete="off" /></label>
+      <label class="ocleet-check"><input type="checkbox" data-ocleet="include-ai" /><span>导入时把最近一次 AI 讲解写进笔记正文</span></label>
     </div>
     <div class="ocleet-tabs" data-ocleet="tabs"></div>
     <div class="ocleet-problem" data-ocleet="problem" hidden></div>
@@ -589,6 +598,7 @@
         <div class="ocleet-btns">
           <button class="ocleet-btn" type="button" data-ocleet="read">读取题目</button>
           <button class="ocleet-btn" type="button" data-ocleet="clear">清空</button>
+          <button class="ocleet-btn" type="button" data-ocleet="import">存入 LeetNote</button>
           <button class="ocleet-btn primary" type="button" data-ocleet="send">发送</button>
         </div>
       </div>
@@ -608,6 +618,9 @@
   const includeCodeEl = $("include-code");
   const autoReadEl = $("auto-read");
   const settingsBox = $("settings-box");
+  const leetnoteUrlInput = $("leetnote-url");
+  const leetnoteTokenInput = $("leetnote-token");
+  const includeAiEl = $("include-ai");
 
   let history = [];
   let busy = false;
@@ -801,6 +814,126 @@
     }
   }
 
+  /* ---------------------------------------------------------- LeetNote export */
+  // 把当前题目 + 代码（可选带上 AI 讲解）存进本机 LeetNote。
+  // 走 GM_xmlhttpRequest：扩展层发请求可绕过 CORS/PNA，本机 :8080 直达。
+  function gmFetch(method, url, headers, body) {
+    return new Promise((resolve, reject) => {
+      if (!hasGM()) {
+        reject(new Error("没有 GM_xmlhttpRequest，请通过 Tampermonkey 使用本脚本"));
+        return;
+      }
+      GM_xmlhttpRequest({
+        method,
+        url,
+        headers,
+        data: body,
+        timeout: 20000,
+        onload: (r) => resolve(r),
+        ontimeout: () => reject(new Error("请求 LeetNote 超时")),
+        onerror: () => reject(new Error("连不上 LeetNote，确认它在 " + leetnoteBase() + " 运行")),
+      });
+    });
+  }
+
+  const leetnoteBase = () => (cfg.leetnoteUrl || DEFAULTS.leetnoteUrl).replace(/\/+$/, "");
+
+  const DIFFICULTY_MAP = { 简单: "Easy", 中等: "Medium", 困难: "Hard" };
+
+  function normalizeDifficulty(raw) {
+    if (!raw) return "";
+    const t = String(raw).trim();
+    const en = t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+    if (en === "Easy" || en === "Medium" || en === "Hard") return en;
+    return DIFFICULTY_MAP[t] || "";
+  }
+
+  // 标题形如「1. 两数之和」/「1.Two Sum」——取出题号；取不到就留空（LeetNote 允许没有题号）
+  function parseLeetCodeId(title) {
+    const m = String(title || "").match(/^\s*(\d+)\s*[.、]/);
+    return m ? Number(m[1]) : null;
+  }
+
+  // LeetNote 会自己用题号拼标题；页面标题里已经带了题号，去掉避免「1. 1. Two Sum」
+  function cleanTitle(title) {
+    return String(title || "")
+      .replace(/^\s*\d+\s*[.、]\s*/, "")
+      .trim();
+  }
+
+  function lastAssistantText() {
+    for (let i = history.length - 1; i >= 0; i -= 1) {
+      if (history[i].role === "assistant" && history[i].content) return history[i].content;
+    }
+    return "";
+  }
+
+  async function importToLeetNote() {
+    const token = (cfg.leetnoteToken || "").trim();
+    if (!token) {
+      addMessage("assistant", "还没配置 LeetNote 令牌。点右上角 ⚙ 填入（在 LeetNote 里用 `go run ./cmd/token -user <用户名>` 生成）。");
+      settingsBox.hidden = false;
+      return;
+    }
+
+    const problem = readProblem();
+    if (!problem.slug) {
+      addMessage("assistant", "没识别到当前题目（slug 为空），请在题目页使用。");
+      return;
+    }
+
+    const solutions = [];
+    if (problem.code && problem.code.trim()) {
+      solutions.push({
+        language: problem.lang || readLanguageLabel() || "python",
+        code: problem.code,
+      });
+    }
+
+    const body = {
+      problem: {
+        title_slug: problem.slug,
+        title: cleanTitle(problem.title) || problem.slug,
+        leetcode_id: parseLeetCodeId(problem.title),
+        difficulty: normalizeDifficulty(problem.difficulty),
+        url: problem.url,
+      },
+      content_md: cfg.includeAi ? lastAssistantText() : "",
+      solutions,
+      source: "openleet",
+    };
+
+    const note = addMessage("assistant", "正在存入 LeetNote…");
+    try {
+      const res = await gmFetch(
+        "POST",
+        leetnoteBase() + "/api/v1/import/note",
+        { "Content-Type": "application/json", Authorization: "Bearer " + token },
+        JSON.stringify(body),
+      );
+
+      let data = {};
+      try {
+        data = JSON.parse(res.responseText);
+      } catch {
+        /* 非 JSON 响应，下面按状态码兜底 */
+      }
+
+      if (res.status >= 200 && res.status < 300) {
+        const action = data.note_created ? "新建" : "更新";
+        const linked = data.problem_created ? "，题目一并新建" : "，已关联已有题目";
+        note.innerHTML = renderMarkdown(`✅ 已${action}笔记：**${data.note?.title || problem.title}**${linked}`);
+      } else if (res.status === 401) {
+        note.innerHTML = renderMarkdown("❌ 令牌无效或已被吊销，去 LeetNote 重新生成后更新 ⚙ 里的配置。");
+      } else {
+        note.innerHTML = renderMarkdown(`❌ 存入失败（HTTP ${res.status}）：${data.error?.message || ""}`);
+      }
+    } catch (err) {
+      note.innerHTML = renderMarkdown(`❌ 存入失败：${err.message || String(err)}`);
+    }
+    scroll();
+  }
+
   /* ------------------------------------------------------------------- wiring */
   function renderTabs() {
     tabsEl.textContent = "";
@@ -865,6 +998,7 @@
   $("close").addEventListener("click", () => (panel.hidden = true));
   $("settings").addEventListener("click", () => (settingsBox.hidden = !settingsBox.hidden));
   $("send").addEventListener("click", onSend);
+  $("import").addEventListener("click", importToLeetNote);
   $("clear").addEventListener("click", () => {
     history = [];
     resetMessages();
@@ -902,12 +1036,27 @@
     cfg.autoRead = autoReadEl.checked;
     saveCfg();
   });
+  leetnoteUrlInput.addEventListener("change", () => {
+    cfg.leetnoteUrl = leetnoteUrlInput.value.trim() || DEFAULTS.leetnoteUrl;
+    saveCfg();
+  });
+  leetnoteTokenInput.addEventListener("change", () => {
+    cfg.leetnoteToken = leetnoteTokenInput.value.trim();
+    saveCfg();
+  });
+  includeAiEl.addEventListener("change", () => {
+    cfg.includeAi = includeAiEl.checked;
+    saveCfg();
+  });
 
   // Reflect stored config into the controls.
   apiKeyInput.value = cfg.apiKey;
   baseUrlInput.value = cfg.baseUrl;
   includeCodeEl.checked = cfg.includeCode;
   autoReadEl.checked = cfg.autoRead;
+  leetnoteUrlInput.value = cfg.leetnoteUrl;
+  leetnoteTokenInput.value = cfg.leetnoteToken;
+  includeAiEl.checked = cfg.includeAi;
   renderTabs();
   fillModels(FALLBACK_MODELS);
   resetMessages();

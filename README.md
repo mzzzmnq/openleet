@@ -59,6 +59,25 @@ The model list is in the script (`FALLBACK_MODELS`).
 Open `demo.html?ocleet=1` in a browser. It stubs the Tampermonkey APIs with a canned
 streaming reply, so you can preview the panel with **no key and no network**.
 
+## 存入 LeetNote（可选）
+
+配合本机的 [LeetNote](https://github.com/mzzzmnq/leetnote)，可以把**当前题目 + 编辑器代码 +
+最近一次 AI 讲解**一键存成一篇笔记，并按 `slug` 关联题单里已有的题目（重复导入会更新同一篇，不会重复建）。
+
+1. 在 LeetNote 里生成一把长期令牌（明文只显示一次）：
+
+   ```powershell
+   cd leetnote-api
+   go run ./cmd/token -user <你的用户名> -name "openleet 插件"
+   ```
+
+2. 在本脚本面板点 **⚙**，填入 **LeetNote 地址**（默认 `http://127.0.0.1:8080`）和 **令牌**（`ln_…`）。
+3. 点面板里的 **存入 LeetNote**。
+
+令牌只留在 Tampermonkey 存储里；请求经 `GM_xmlhttpRequest` 直达本机 LeetNote
+（脚本元数据里因此加了 `@connect 127.0.0.1` / `@connect localhost`，以扩展层绕过 CORS）。
+LeetNote 没在跑或令牌无效时，面板会给出明确提示。
+
 ## Notes / limits
 
 - The userscript must be installed via Tampermonkey (or a compatible manager);
