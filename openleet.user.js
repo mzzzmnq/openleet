@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.1.0
-// @description  在 LeetCode 题目页嵌入 OpenCode Go 模型的对话面板：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你的 OpenCode Go key，不依赖任何本地服务。
+// @version      2.2.0
+// @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.7-Flash，永久免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
 // @match        https://leetcode.cn/problems/*
@@ -13,7 +13,7 @@
 // @grant        GM_getValue
 // @grant        GM_xmlhttpRequest
 // @grant        unsafeWindow
-// @connect      opencode.ai
+// @connect      *
 // @connect      127.0.0.1
 // @connect      localhost
 // @run-at       document-idle
@@ -22,15 +22,18 @@
 /**
  * openleet（独立版）
  * =======================
- * 一个纯前端用户脚本：在 LeetCode 题目页右下角注入对话面板，直接调用 OpenCode Go
- * 的 OpenAI 兼容接口，不需要任何本地服务（不依赖 openleet）。
+ * 一个纯前端用户脚本：在 LeetCode 题目页右下角注入对话面板，直接调用 OpenAI 兼容
+ * 接口，不需要任何本地服务。
  *
- *   browser (leetcode.com)  --GM_xmlhttpRequest-->  https://opencode.ai/zen/go/v1/chat/completions
+ *   browser (leetcode.com)  --GM_xmlhttpRequest-->  <baseUrl>/chat/completions
  *
- * 为什么必须用 GM_xmlhttpRequest：opencode.ai 不返回 CORS 头，页面里的 fetch 会被
- * 浏览器拦（实测 OPTIONS 404、POST 无 Access-Control-Allow-Origin）；油猴的
- * GM_xmlhttpRequest 在扩展层发请求，可绕过 CORS。API key 存在油猴自己的存储里
- * （GM_setValue），不写进页面、不发往别处。
+ * **默认供应商是智谱 GLM-4.7-Flash（永久免费、国内直连）**；
+ * 想改用 OpenCode Go，在 ⚙ 里把接口地址换成 https://opencode.ai/zen/go/v1 即可
+ * （代码会自动给 OpenCode Go 补上 x-opencode-session 头）。
+ *
+ * 为什么必须用 GM_xmlhttpRequest：多数模型服务不返回 CORS 头，页面里的 fetch 会被
+ * 浏览器拦；油猴的 GM_xmlhttpRequest 在扩展层发请求，可绕过 CORS。API key 存在
+ * 油猴自己的存储里（GM_setValue），不写进页面、只发给你配置的那个端点。
  *
  * 三种 skill：
  *   hint    分步提示（Socratic）
@@ -39,6 +42,7 @@
  *
  * 注意：必须通过 Tampermonkey 安装。若检测不到 GM_xmlhttpRequest（例如被当作普通
  * 网页脚本加载），会退回 fetch —— 那样会因 CORS 失败。
+ * 元数据里的 `@connect *` 是为了支持「用户自定义接口地址」；只发给配置的那个端点。
  */
 (function () {
   "use strict";
@@ -103,8 +107,10 @@
   /* ----------------------------------------------------------------- config */
   const DEFAULTS = {
     apiKey: "",
-    baseUrl: "https://opencode.ai/zen/go/v1",
-    model: "deepseek-v4.1-flash",
+    // 默认用智谱 GLM-4.7-Flash（永久免费、国内直连、编码/中文强）。
+    // 想改用 OpenCode Go：把 baseUrl 换成 https://opencode.ai/zen/go/v1。
+    baseUrl: "https://open.bigmodel.cn/api/paas/v4",
+    model: "glm-4.7-flash",
     includeCode: true,
     autoRead: true,
     mode: "hint",
@@ -118,10 +124,12 @@
   const goBase = () => (cfg.baseUrl || DEFAULTS.baseUrl).replace(/\/+$/, "");
   const chatUrl = () => goBase() + "/chat/completions";
   const usageUrl = () => goBase() + "/usage";
+  // 只有 OpenCode Go 需要专用会话头，也只有它有 /usage 可用来校验 key。
+  const isOpenCode = () => /opencode\.ai/i.test(goBase());
 
-  // 走 Go 的 OpenAI 兼容 /chat/completions 的模型（MiniMax/Qwen 走 /messages、
-  // Grok/Muse 走 /responses，不在这个列表里）。
-  const FALLBACK_MODELS = [
+  // OpenCode Go 的模型候选（走 OpenAI 兼容 /chat/completions；MiniMax/Qwen 走
+  // /messages、Grok/Muse 走 /responses，不在这个列表里）。
+  const OPENCODE_MODELS = [
     { id: "deepseek-v4.1-flash", label: "DeepSeek V4.1 Flash" },
     { id: "deepseek-v4-pro", label: "DeepSeek V4 Pro" },
     { id: "deepseek-v4-flash", label: "DeepSeek V4 Flash" },
@@ -148,6 +156,23 @@
     { id: "hy3", label: "Hy3" },
     { id: "space-bunny", label: "Space Bunny" },
   ];
+
+  // 智谱（默认供应商）的模型候选。glm-4.7-flash / glm-4.5-flash 永久免费。
+  const ZHIPU_MODELS = [
+    { id: "glm-4.7-flash", label: "GLM-4.7-Flash（免费）" },
+    { id: "glm-4.5-flash", label: "GLM-4.5-Flash（免费）" },
+    { id: "glm-4.7", label: "GLM-4.7" },
+    { id: "glm-4.5-air", label: "GLM-4.5-Air" },
+    { id: "glm-4.5", label: "GLM-4.5" },
+  ];
+
+  // 按当前 base_url 选模型候选；换供应商就换一套。
+  function modelsForBase() {
+    const base = goBase();
+    if (/bigmodel\.cn/i.test(base)) return ZHIPU_MODELS;
+    if (/opencode\.ai/i.test(base)) return OPENCODE_MODELS;
+    return ZHIPU_MODELS;
+  }
 
   /* ----------------------------------------------------------------- skills */
   const BASE_SYSTEM = [
@@ -388,12 +413,12 @@
   function directChat(payload, onDelta, onReasoning) {
     return new Promise((resolve, reject) => {
       if (!hasGM()) {
-        reject(new Error("没有 GM_xmlhttpRequest：请用 Tampermonkey 安装本脚本（普通网页脚本无法绕过 opencode.ai 的 CORS）。"));
+        reject(new Error("没有 GM_xmlhttpRequest：请用 Tampermonkey 安装本脚本（普通网页脚本无法绕过目标服务的 CORS）。"));
         return;
       }
       const key = cleanKey();
       if (!key) {
-        reject(new Error("还没填 API key：点右上角 ⚙ 填入你的 OpenCode Go key。"));
+        reject(new Error("还没填 API key：点右上角 ⚙ 填入你的 API Key。"));
         return;
       }
 
@@ -440,12 +465,15 @@
       GM_xmlhttpRequest({
         method: "POST",
         url: chatUrl(),
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${key}`,
-          accept: "text/event-stream",
-          "x-opencode-session": "ocleet-" + Date.now(),
-        },
+        headers: Object.assign(
+          {
+            "content-type": "application/json",
+            authorization: `Bearer ${key}`,
+            accept: "text/event-stream",
+          },
+          // 只有 OpenCode Go 需要这个头（不带会 503）；其它供应商不必发
+          isOpenCode() ? { "x-opencode-session": "ocleet-" + Date.now() } : {},
+        ),
         data: JSON.stringify({ ...payload, stream: true }),
         timeout: 180_000,
         onprogress: (r) => {
@@ -474,17 +502,21 @@
           }
           settle(resolve, true);
         },
-        onerror: () => settle(reject, new Error("无法连接 opencode.ai（网络问题或 key 无效）。")),
+        onerror: () => settle(reject, new Error("无法连接模型服务（网络问题或 key 无效）。")),
         ontimeout: () => settle(reject, new Error("请求超时（180 秒）。")),
       });
     });
   }
 
-  /** Verify the stored key against the usage endpoint (200 = good, 401 = bad). */
+  /**
+   * 校验存储的 key。OpenCode Go 有 /usage 端点（200 好 / 401 坏）；
+   * 智谱等其它供应商没有轻量校验端点，只判断「有没有填」，真正的错误在对话时暴露。
+   */
   function checkKey() {
     const key = cleanKey();
     if (!key) return Promise.resolve({ ok: false, reason: "no-key" });
     if (!hasGM()) return Promise.resolve({ ok: false, reason: "no-gm" });
+    if (!isOpenCode()) return Promise.resolve({ ok: true });
     return new Promise((resolve) => {
       GM_xmlhttpRequest({
         method: "GET",
@@ -579,7 +611,7 @@
       </div>
     </div>
     <div class="ocleet-settings" data-ocleet="settings-box" hidden>
-      <label class="ocleet-field"><span>OpenCode Go API key</span><input type="password" data-ocleet="apikey" placeholder="oc_sk_…" autocomplete="off" /></label>
+      <label class="ocleet-field"><span>API Key（智谱 / OpenCode Go）</span><input type="password" data-ocleet="apikey" placeholder="粘贴你的 API Key" autocomplete="off" /></label>
       <label class="ocleet-field"><span>接口地址（一般不用改）</span><input type="text" data-ocleet="baseurl" /></label>
       <label class="ocleet-field"><span>模型</span><select data-ocleet="model"></select></label>
       <label class="ocleet-check"><input type="checkbox" data-ocleet="include-code" /><span>把当前编辑器里的代码发给模型</span></label>
@@ -984,7 +1016,7 @@
     } else if (result.reason === "http") {
       addMessage("assistant", `API key 校验失败（HTTP ${result.status}）：key 可能无效或已过期。`);
     } else if (result.reason === "network" || result.reason === "timeout") {
-      addMessage("assistant", "连不上 opencode.ai，检查一下网络或代理。");
+      addMessage("assistant", "连不上模型服务，检查网络或代理。");
     }
   }
 
@@ -1022,6 +1054,9 @@
   baseUrlInput.addEventListener("change", () => {
     cfg.baseUrl = baseUrlInput.value.trim() || DEFAULTS.baseUrl;
     saveCfg();
+    // 换供应商后模型候选不同，重填一次下拉（fillModels 可能会调整 cfg.model）
+    fillModels(modelsForBase());
+    saveCfg();
     verifyKey();
   });
   modelSelect.addEventListener("change", () => {
@@ -1058,7 +1093,7 @@
   leetnoteTokenInput.value = cfg.leetnoteToken;
   includeAiEl.checked = cfg.includeAi;
   renderTabs();
-  fillModels(FALLBACK_MODELS);
+  fillModels(modelsForBase());
   resetMessages();
 
   verifyKey();
