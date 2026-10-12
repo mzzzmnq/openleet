@@ -2,7 +2,7 @@
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
 // @version      2.2.0
-// @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.7-Flash，永久免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
+// @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.5-Flash，免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
 // @match        https://leetcode.cn/problems/*
@@ -27,7 +27,7 @@
  *
  *   browser (leetcode.com)  --GM_xmlhttpRequest-->  <baseUrl>/chat/completions
  *
- * **默认供应商是智谱 GLM-4.7-Flash（永久免费、国内直连）**；
+ * **默认供应商是智谱 GLM-4.5-Flash（免费、国内直连）**；
  * 想改用 OpenCode Go，在 ⚙ 里把接口地址换成 https://opencode.ai/zen/go/v1 即可
  * （代码会自动给 OpenCode Go 补上 x-opencode-session 头）。
  *
@@ -107,10 +107,10 @@
   /* ----------------------------------------------------------------- config */
   const DEFAULTS = {
     apiKey: "",
-    // 默认用智谱 GLM-4.7-Flash（永久免费、国内直连、编码/中文强）。
+    // 默认用智谱 GLM-4.5-Flash（免费、国内直连、实测较稳）。
     // 想改用 OpenCode Go：把 baseUrl 换成 https://opencode.ai/zen/go/v1。
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-    model: "glm-4.7-flash",
+    model: "glm-4.5-flash",
     includeCode: true,
     autoRead: true,
     mode: "hint",
@@ -157,13 +157,14 @@
     { id: "space-bunny", label: "Space Bunny" },
   ];
 
-  // 智谱（默认供应商）的模型候选。glm-4.7-flash / glm-4.5-flash 永久免费。
+  // 智谱（默认供应商）的模型候选。
+  // glm-4.5-flash 免费且实测较稳；glm-4.7-flash 也免费但常被限流。
   const ZHIPU_MODELS = [
-    { id: "glm-4.7-flash", label: "GLM-4.7-Flash（免费）" },
-    { id: "glm-4.5-flash", label: "GLM-4.5-Flash（免费）" },
-    { id: "glm-4.7", label: "GLM-4.7" },
-    { id: "glm-4.5-air", label: "GLM-4.5-Air" },
-    { id: "glm-4.5", label: "GLM-4.5" },
+    { id: "glm-4.5-flash", label: "GLM-4.5-Flash（免费·较稳）" },
+    { id: "glm-4.7-flash", label: "GLM-4.7-Flash（免费·常限流）" },
+    { id: "glm-4.7", label: "GLM-4.7（付费）" },
+    { id: "glm-4.5-air", label: "GLM-4.5-Air（付费）" },
+    { id: "glm-4.5", label: "GLM-4.5（付费）" },
   ];
 
   // 按当前 base_url 选模型候选；换供应商就换一套。
