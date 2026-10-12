@@ -25,8 +25,12 @@ bypasses CORS — that is what makes a pure client-side plugin possible.
 2. Open `openleet.user.js` (or drag it into the browser) and confirm the install,
    or create a new script and paste its contents.
 3. Open any `https://leetcode.com/problems/...`.
-4. Click **⚙** in the panel and paste your **OpenCode Go API key** (`oc_sk_…`).
-   The status dot turns green when it checks out.
+4. Click **⚙** in the panel, choose a **供应商 (provider)**, and paste that provider's key:
+   - **智谱 GLM**（默认，免费）— key from <https://open.bigmodel.cn/>
+   - **OpenCode Go** — key `oc_sk_…`
+
+   切换供应商时，**接口地址、模型列表、key 都会自动跟着切**；而且**每家各存一把 key**，
+   来回切换不会把一家的 key 发到另一家。
 
 ## Usage
 
@@ -47,12 +51,18 @@ The panel supports streaming output, a collapsible reasoning trace, one-click co
 copy, a dark theme, and resets the conversation when you switch problems (LeetCode
 is an SPA).
 
-## Supported models
+## Providers & models
 
-OpenAI-compatible `/chat/completions` models only (25 of them: DeepSeek, GLM, Kimi,
-MiMo, Hy, LongCat, …). MiniMax / Qwen use `/v1/messages` and Grok / Muse use
-`/v1/responses`; those protocols are not implemented, and picking them errors out.
-The model list is in the script (`FALLBACK_MODELS`).
+在 **⚙ → 供应商** 里切换；接口地址、模型列表、API key 都随供应商自动切换。
+
+| 供应商 | 默认模型 | 备注 |
+| --- | --- | --- |
+| **智谱 GLM**（默认） | `glm-4.5-flash` | 永久免费、国内直连；`glm-4.7-flash` 也免费但常被限流 |
+| **OpenCode Go** | `longcat-2.5-preview-free` | 需自己的 key（脚本不读本机凭据）；自动带 `x-opencode-session` |
+
+OpenAI-compatible `/chat/completions` only. MiniMax / Qwen use `/v1/messages`,
+Grok / Muse use `/v1/responses` — 未实现，选了会报错。
+模型清单在脚本里（`ZHIPU_MODELS` / `OPENCODE_MODELS`）。
 
 ## Offline demo
 

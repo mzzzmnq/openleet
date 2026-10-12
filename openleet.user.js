@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.2.0
+// @version      2.3.0
 // @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.5-Flash，免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -106,26 +106,35 @@
 
   /* ----------------------------------------------------------------- config */
   const DEFAULTS = {
-    apiKey: "",
+    apiKey: "", // 兼容旧配置（会迁移到下面的 keys）
     // 默认用智谱 GLM-4.5-Flash（免费、国内直连、实测较稳）。
-    // 想改用 OpenCode Go：把 baseUrl 换成 https://opencode.ai/zen/go/v1。
     baseUrl: "https://open.bigmodel.cn/api/paas/v4",
     model: "glm-4.5-flash",
     includeCode: true,
     autoRead: true,
     mode: "hint",
+    // 每个供应商各存一把 key —— 切换供应商时不会把 A 家的 key 发到 B 家
+    keys: { zhipu: "", opencode: "" },
     // ---- 导出到 LeetNote ----
     leetnoteUrl: "http://127.0.0.1:8080",
     leetnoteToken: "",
     includeAi: true,
   };
   const cfg = { ...DEFAULTS, ...(store.get("config") || {}) };
+  if (!cfg.keys) cfg.keys = { zhipu: "", opencode: "" };
   const saveCfg = () => store.set("config", cfg);
+
+  // 可切换的供应商（下拉里用）。模型候选见 modelsForBase()。
+  const PROVIDERS = {
+    zhipu: { label: "智谱 GLM（免费）", baseUrl: "https://open.bigmodel.cn/api/paas/v4" },
+    opencode: { label: "OpenCode Go", baseUrl: "https://opencode.ai/zen/go/v1" },
+  };
   const goBase = () => (cfg.baseUrl || DEFAULTS.baseUrl).replace(/\/+$/, "");
   const chatUrl = () => goBase() + "/chat/completions";
   const usageUrl = () => goBase() + "/usage";
   // 只有 OpenCode Go 需要专用会话头，也只有它有 /usage 可用来校验 key。
   const isOpenCode = () => /opencode\.ai/i.test(goBase());
+  const currentProvider = () => (isOpenCode() ? "opencode" : "zhipu");
 
   // OpenCode Go 的模型候选（走 OpenAI 兼容 /chat/completions；MiniMax/Qwen 走
   // /messages、Grok/Muse 走 /responses，不在这个列表里）。
@@ -401,8 +410,12 @@
   function hasGM() {
     return typeof GM_xmlhttpRequest === "function";
   }
+  // 取指定供应商自己的 key
+  function providerKey(provider) {
+    return String((cfg.keys && cfg.keys[provider]) || "").trim().replace(/^Bearer\s+/i, "");
+  }
   function cleanKey() {
-    return String(cfg.apiKey || "").trim().replace(/^Bearer\s+/i, "");
+    return providerKey(currentProvider());
   }
 
   /**
@@ -612,7 +625,11 @@
       </div>
     </div>
     <div class="ocleet-settings" data-ocleet="settings-box" hidden>
-      <label class="ocleet-field"><span>API Key（智谱 / OpenCode Go）</span><input type="password" data-ocleet="apikey" placeholder="粘贴你的 API Key" autocomplete="off" /></label>
+      <label class="ocleet-field"><span>供应商</span><select data-ocleet="provider">
+        <option value="zhipu">智谱 GLM（免费）</option>
+        <option value="opencode">OpenCode Go</option>
+      </select></label>
+      <label class="ocleet-field"><span>API Key（当前供应商）</span><input type="password" data-ocleet="apikey" placeholder="粘贴你该供应商的 API Key" autocomplete="off" /></label>
       <label class="ocleet-field"><span>接口地址（一般不用改）</span><input type="text" data-ocleet="baseurl" /></label>
       <label class="ocleet-field"><span>模型</span><select data-ocleet="model"></select></label>
       <label class="ocleet-check"><input type="checkbox" data-ocleet="include-code" /><span>把当前编辑器里的代码发给模型</span></label>
@@ -647,6 +664,7 @@
   const tabsEl = $("tabs");
   const modelSelect = $("model");
   const apiKeyInput = $("apikey");
+  const providerSelect = $("provider");
   const baseUrlInput = $("baseurl");
   const includeCodeEl = $("include-code");
   const autoReadEl = $("auto-read");
@@ -1048,14 +1066,26 @@
     }
   });
   apiKeyInput.addEventListener("change", () => {
-    cfg.apiKey = apiKeyInput.value.trim();
+    cfg.keys[currentProvider()] = apiKeyInput.value.trim();
+    saveCfg();
+    verifyKey();
+  });
+  providerSelect.addEventListener("change", () => {
+    const p = providerSelect.value;
+    cfg.baseUrl = (PROVIDERS[p] || PROVIDERS.zhipu).baseUrl;
+    baseUrlInput.value = cfg.baseUrl;
+    // 换供应商：模型候选随之切换（fillModels 会把不在列表里的 cfg.model 换成第一项）
+    fillModels(modelsForBase());
+    // 载入该供应商自己的 key，避免把 A 家的 key 发到 B 家
+    apiKeyInput.value = providerKey(p);
     saveCfg();
     verifyKey();
   });
   baseUrlInput.addEventListener("change", () => {
     cfg.baseUrl = baseUrlInput.value.trim() || DEFAULTS.baseUrl;
     saveCfg();
-    // 换供应商后模型候选不同，重填一次下拉（fillModels 可能会调整 cfg.model）
+    // 手动改地址后，供应商下拉与模型候选也跟着变
+    providerSelect.value = currentProvider();
     fillModels(modelsForBase());
     saveCfg();
     verifyKey();
@@ -1086,7 +1116,14 @@
   });
 
   // Reflect stored config into the controls.
-  apiKeyInput.value = cfg.apiKey;
+  // 旧配置迁移：以前只有一个 apiKey，归到「当前供应商」名下后清掉（避免串给别家）
+  if (cfg.apiKey) {
+    if (!cfg.keys[currentProvider()]) cfg.keys[currentProvider()] = cfg.apiKey;
+    cfg.apiKey = "";
+    saveCfg();
+  }
+  providerSelect.value = currentProvider();
+  apiKeyInput.value = providerKey(currentProvider());
   baseUrlInput.value = cfg.baseUrl;
   includeCodeEl.checked = cfg.includeCode;
   autoReadEl.checked = cfg.autoRead;
