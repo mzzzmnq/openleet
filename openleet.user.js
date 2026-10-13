@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.3.0
+// @version      2.3.1
 // @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.5-Flash，免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -337,36 +337,72 @@
     return text || null;
   }
 
+  let lastCodeEditorNode = null;
+  document.addEventListener("focusin", (event) => {
+    const node = event.target?.closest?.(".monaco-editor");
+    if (node) lastCodeEditorNode = node;
+  });
+
+  function visibleEditor(node) {
+    return !!node && node.isConnected && node.getClientRects().length > 0;
+  }
+
+  function readModel(model) {
+    try {
+      if (!model || model.isDisposed?.()) return null;
+      const code = model.getValue();
+      if (typeof code !== "string") return null;
+      let lang = null;
+      try { lang = model.getLanguageId?.() || null; } catch { /* optional */ }
+      // An empty current model is valid: never replace it with old code.
+      return { code, lang, codeSource: "model", codeIncomplete: false };
+    } catch {
+      return null;
+    }
+  }
+
   function readCode() {
     try {
       const monaco = PAGE.monaco;
-      if (monaco && monaco.editor && typeof monaco.editor.getModels === "function") {
-        const candidates = [];
-        for (const model of monaco.editor.getModels()) {
-          let value = "";
-          let lang = "";
+      const api = monaco?.editor;
+      // Resolve the editor and its model afresh on every read (including sends
+      // and exports). Model length/order does not identify the current editor.
+      if (typeof api?.getEditors === "function") {
+        const editors = [];
+        for (const editor of api.getEditors()) {
           try {
-            value = model.getValue();
-          } catch {
-            continue;
-          }
-          try {
-            lang = model.getLanguageId ? model.getLanguageId() : "";
-          } catch {
-            lang = "";
-          }
-          if (value && value.trim()) candidates.push({ value, lang });
+            const node = editor.getDomNode();
+            if (!visibleEditor(node)) continue;
+            const readOnlyOption = monaco.EditorOption?.readOnly;
+            if (readOnlyOption !== undefined && editor.getOption?.(readOnlyOption)) continue;
+            const result = readModel(editor.getModel());
+            if (result) editors.push({ node, result, focused: editor.hasTextFocus?.() });
+          } catch { /* A disposed editor must not hide the remaining editors. */ }
         }
+        const pick = editors.find((entry) => entry.focused)
+          || editors.find((entry) => entry.node === lastCodeEditorNode)
+          || (editors.length === 1 ? editors[0] : null);
+        if (pick) return pick.result;
+      }
+      if (typeof api?.getModels === "function") {
+        const candidates = api.getModels().map(readModel).filter(Boolean);
         const codey = candidates.filter((c) => c.lang && c.lang !== "markdown" && c.lang !== "plaintext");
-        const pick = (codey.length ? codey : candidates).sort((a, b) => b.value.length - a.value.length)[0];
-        if (pick) return { code: pick.value, lang: pick.lang || null };
+        const pool = codey.length ? codey : candidates;
+        // Older Monaco builds may expose only getModels. Accept an unambiguous
+        // model, but do not guess between current/previous/diff models.
+        if (pool.length === 1) return pool[0];
       }
     } catch {
       /* fall through to DOM */
     }
-    const lines = Array.from(document.querySelectorAll(".monaco-editor .view-line")).map((l) => l.textContent);
-    if (lines.length) return { code: lines.join("\n"), lang: readLanguageLabel() };
-    return { code: "", lang: readLanguageLabel() };
+    const nodes = Array.from(document.querySelectorAll(".monaco-editor")).filter(visibleEditor);
+    const node = nodes.find((entry) => entry === lastCodeEditorNode) || (nodes.length === 1 ? nodes[0] : null);
+    const lines = node ? Array.from(node.querySelectorAll(".view-line")) : [];
+    if (lines.length) return {
+      code: lines.map((line) => line.textContent.replace(/\u00a0/g, " ")).join("\n"),
+      lang: readLanguageLabel(), codeSource: "dom", codeIncomplete: true,
+    };
+    return { code: "", lang: readLanguageLabel(), codeSource: "unavailable", codeIncomplete: true };
   }
 
   function currentSlug() {
@@ -374,15 +410,14 @@
   }
 
   function readProblem() {
-    const { code, lang } = readCode();
+    const codeContext = readCode();
     return {
       title: readTitle(),
       slug: currentSlug(),
       difficulty: readDifficulty(),
       tags: readTags(),
       description: readDescription(),
-      code,
-      lang,
+      ...codeContext,
       url: location.href,
     };
   }
@@ -801,7 +836,9 @@
     const codeLen = (problem.code || "").trim().length;
     const meta = document.createElement("span");
     meta.className = "ocleet-muted";
-    meta.textContent = cfg.includeCode ? `· 代码 ${codeLen} 字符` : "· 不发送代码";
+    meta.textContent = cfg.includeCode
+      ? `· 代码 ${codeLen} 字符${problem.codeIncomplete ? "（未获取完整代码）" : ""}`
+      : "· 不发送代码";
     problemEl.appendChild(meta);
   }
 
@@ -820,9 +857,10 @@
     lines.push("", "【题目描述】");
     lines.push((problem.description || "(未读取到题目描述；如果题目不是这道，请让用户把题目贴过来)").slice(0, 8000));
     if (cfg.includeCode) {
+      if (problem.codeIncomplete) lines.push("注意：未获取到完整编辑器代码，以下可能仅是可见片段；不要把缺失部分判断为用户未实现。");
       lines.push("", `【用户当前代码${problem.lang ? `（${problem.lang}）` : ""}】`);
       lines.push("```" + (problem.lang || ""));
-      lines.push((problem.code || "(暂未读取到编辑器代码)").slice(0, 8000));
+      lines.push((problem.code || (problem.codeSource === "model" ? "(当前编辑器代码为空)" : "(暂未读取到编辑器代码)")).slice(0, 8000));
       lines.push("```");
     }
     return lines.join("\n");
@@ -1057,7 +1095,10 @@
   $("read").addEventListener("click", () => {
     const problem = readProblem();
     renderProblemChip(problem);
-    addMessage("assistant", `已读取题目 **${problem.title || "(未识别)"}**。${problem.code ? "也读到了你编辑器里的代码。" : "没读到编辑器代码，可以手动贴给我。"}`);
+    const codeStatus = problem.codeSource === "model"
+      ? (problem.code.trim() ? "已更新当前编辑器代码。" : "当前编辑器代码为空。")
+      : (problem.code ? "只读到了编辑器可见的代码片段，可能不完整；可以手动粘贴完整代码。" : "没读到编辑器代码，可以手动贴给我。");
+    addMessage("assistant", `已读取题目 **${problem.title || "(未识别)"}**。${codeStatus}`);
   });
   inputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {

@@ -1,97 +1,302 @@
-# openleet
+# openleet · LeetCode 题目 AI 助手
 
-A Tampermonkey userscript that drops a problem-aware AI chat panel into LeetCode,
-powered by your own **OpenCode Go** models — hints, code explanation, and debugging,
-like LeetCode's built-in assistant but on your own quota.
+openleet 是一个运行在 Tampermonkey（油猴）中的用户脚本。它在 LeetCode 题目页右下角加入 AI 对话面板，读取当前题目和编辑器代码，帮助你获得提示、理解代码和排查错误。
 
-```
-leetcode.com  --GM_xmlhttpRequest-->  https://opencode.ai/zen/go/v1/chat/completions
-```
+**无需部署后端，也不需要构建项目。** 安装脚本、配置自己的模型服务 API Key 即可使用。当前版本为 **2.3.1**，内置智谱 GLM 和 OpenCode Go 两个供应商入口，可选对接本机 LeetNote 保存笔记。
 
-**No server, no build step.** The script talks to OpenCode Go directly. The API key
-is stored in Tampermonkey's own storage (`GM_setValue`) and never leaves your browser
-except in requests to `opencode.ai`.
+## 目录
 
-## Why a userscript (and why `GM_xmlhttpRequest`)
+- [功能概览](#功能概览)
+- [安装与首次配置](#安装与首次配置)
+- [更新脚本](#更新脚本)
+- [日常使用](#日常使用)
+- [供应商与模型配置](#供应商与模型配置)
+- [题目与代码如何读取](#题目与代码如何读取)
+- [存入 LeetNote](#存入-leetnote)
+- [数据存储与请求流向](#数据存储与请求流向)
+- [离线演示](#离线演示)
+- [常见问题](#常见问题)
+- [开发与测试](#开发与测试)
+- [已知限制](#已知限制)
+- [版本记录](#版本记录)
 
-`opencode.ai` does **not** send CORS headers (`OPTIONS` → 404, `POST` has no
-`Access-Control-Allow-Origin`), so a page `fetch` is blocked by the browser.
-Tampermonkey's `GM_xmlhttpRequest` issues the request from the extension layer and
-bypasses CORS — that is what makes a pure client-side plugin possible.
+## 功能概览
 
-## Install
-
-1. Install [Tampermonkey](https://www.tampermonkey.net/).
-2. Open `openleet.user.js` (or drag it into the browser) and confirm the install,
-   or create a new script and paste its contents.
-3. Open any `https://leetcode.com/problems/...`.
-4. Click **⚙** in the panel, choose a **供应商 (provider)**, and paste that provider's key:
-   - **智谱 GLM**（默认，免费）— key from <https://open.bigmodel.cn/>
-   - **OpenCode Go** — key `oc_sk_…`
-
-   切换供应商时，**接口地址、模型列表、key 都会自动跟着切**；而且**每家各存一把 key**，
-   来回切换不会把一家的 key 发到另一家。
-
-## Usage
-
-- Pick a mode, click **读取题目**, then ask (Enter to send, Shift+Enter for newline).
-- Every request automatically includes the problem title, difficulty, tags, link,
-  description, and your editor code (read from the page's Monaco model, falling back
-  to DOM text; can be turned off in settings).
-
-### Three skills
-
-| Mode | Behavior |
+| 功能 | 说明 |
 | --- | --- |
-| 分步提示 (step-by-step hints) | Socratic: one key step at a time; no ready-to-submit code unless you ask |
-| 讲代码+复杂度 (explain) | Walks through your code and derives time/space complexity |
-| Debug 报错 (debug) | Locates the root cause from the error / failing case + code, suggests a minimal fix |
+| 分步提示 | 引导你逐步分析问题；默认不直接给完整答案，除非你明确要求 |
+| 讲代码+复杂度 | 结合当前编辑器代码解释实现，并分析时间、空间复杂度 |
+| Debug 报错 | 结合代码以及你提供的报错、失败用例分析原因 |
+| 自动附带题目上下文 | 尝试读取标题、难度、标签、题目描述、链接和编辑器代码 |
+| 流式回答 | 脚本管理器支持增量响应时逐步显示，否则等待完整响应 |
+| 回答展示 | 支持基础 Markdown、代码块复制，以及服务返回的推理内容折叠展示 |
+| 供应商切换 | 智谱与 OpenCode Go 分别保存 Key，切换时调整接口地址和模型选项 |
+| LeetNote 导出 | 将题目信息、读取到的代码和可选的最近一次 AI 回答提交到 LeetNote |
 
-The panel supports streaming output, a collapsible reasoning trace, one-click code
-copy, a dark theme, and resets the conversation when you switch problems (LeetCode
-is an SPA).
+脚本匹配 `leetcode.com`、`leetcode.cn` 及其 `www` 域名下的 `/problems/*` 页面。页面结构变化可能影响读取结果。
 
-## Providers & models
+## 安装与首次配置
 
-在 **⚙ → 供应商** 里切换；接口地址、模型列表、API key 都随供应商自动切换。
+### 1. 安装脚本管理器
 
-| 供应商 | 默认模型 | 备注 |
+在浏览器中安装并启用 [Tampermonkey](https://www.tampermonkey.net/)。实际调用模型依赖它提供的 `GM_xmlhttpRequest` 等接口。
+
+### 2. 安装 openleet
+
+打开 [脚本源文件](https://github.com/mzzzmnq/openleet/blob/main/openleet.user.js)，或尝试打开 [原始脚本安装链接](https://raw.githubusercontent.com/mzzzmnq/openleet/main/openleet.user.js)。
+
+- 如果 Tampermonkey 弹出安装页面，确认安装。
+- 如果浏览器只显示源码，在 Tampermonkey 管理面板中选择“添加新脚本”，删除默认内容，粘贴 `openleet.user.js` 的完整内容并保存。
+
+### 3. 配置供应商和 API Key
+
+1. 打开任意 LeetCode 题目页面。
+2. 点击右下角 **⌘ AI 助手**。
+3. 点击面板右上角 **⚙**。
+4. 选择供应商，填写该供应商的 **API Key**。
+5. 检查模型选项，点击输入框外部使设置生效，然后发送一条消息验证。
+
+默认配置为智谱接口和 `glm-4.5-flash`。模型能否使用、额度及价格由供应商决定；脚本中的模型名称或“免费”标签不代表实时服务承诺。
+
+## 更新脚本
+
+已安装的用户建议直接编辑原有脚本，以保留 Tampermonkey 为它保存的配置。
+
+1. 打开 [最新版脚本源码](https://raw.githubusercontent.com/mzzzmnq/openleet/main/openleet.user.js)，复制全部内容。
+2. 打开 Tampermonkey → **管理面板**。
+3. 找到 **openleet · 题目 AI 助手**，点击名称进入编辑页面。
+4. 全选旧代码，粘贴新代码，按 **Ctrl+S** 保存。
+5. 刷新已经打开的 LeetCode 题目页面。
+6. 如需确认版本，检查脚本头部的 `@version`，本版应为 `2.3.1`。
+
+只替换同一脚本的源码，配置和 API Key 通常会保留。不要为了更新先删除原脚本；删除时清理脚本数据可能丢失设置。也不要同时启用多个 openleet 副本。
+
+当前源码没有显式设置 `@updateURL` 和 `@downloadURL`，自动更新行为取决于安装来源及脚本管理器设置；上述手动方式可直接使用。
+
+## 日常使用
+
+1. 打开题目，等待题目描述和代码编辑器加载完成。
+2. 选择 **分步提示**、**讲代码+复杂度** 或 **Debug 报错**。
+3. 点击 **读取题目**，检查题目名称、代码字符数及读取提示。
+4. 输入问题并发送：**Enter** 发送，**Shift+Enter** 换行。
+5. 修改代码后，可以再次点击 **读取题目** 检查；即使不点击，发送消息时也会重新读取当前页面。
+
+提问示例：
+
+- “先给我一个提示，不要直接给完整答案。”
+- “解释我现在的代码，为什么时间复杂度是 O(n²)？”
+- “输入 `[3, 3]`、目标值 `6` 时结果不对，帮我定位原因。”
+
+**Debug 模式不会自动采集运行结果、报错日志或失败用例**，请将这些内容粘贴到输入框中。
+
+其他操作与设置：
+
+| 操作或设置 | 作用 |
+| --- | --- |
+| 清空 | 重置当前聊天记录，不删除供应商配置 |
+| ✕ | 隐藏助手面板 |
+| 把当前编辑器里的代码发给模型 | 控制 AI 请求是否附带自动读取的代码；不影响手动输入，也不控制 LeetNote 导出 |
+| 打开面板时自动读取题目 | 控制打开面板时的自动读取；关闭后，发送消息仍会读取题目 |
+
+聊天记录保存在当前页面内存中，刷新后不会恢复。切换题目的 `slug` 时，脚本会检测变化并重置聊天。
+
+## 供应商与模型配置
+
+| 供应商 | 内置接口地址 | 脚本行为 |
 | --- | --- | --- |
-| **智谱 GLM**（默认） | `glm-4.5-flash` | 永久免费、国内直连；`glm-4.7-flash` 也免费但常被限流 |
-| **OpenCode Go** | `longcat-2.5-preview-free` | 需自己的 key（脚本不读本机凭据）；自动带 `x-opencode-session` |
+| 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4` | 初始默认模型为 `glm-4.5-flash` |
+| OpenCode Go | `https://opencode.ai/zen/go/v1` | 使用对应模型列表，请求自动附带 `x-opencode-session` |
 
-OpenAI-compatible `/chat/completions` only. MiniMax / Qwen use `/v1/messages`,
-Grok / Muse use `/v1/responses` — 未实现，选了会报错。
-模型清单在脚本里（`ZHIPU_MODELS` / `OPENCODE_MODELS`）。
+### 切换供应商
 
-## Offline demo
+在 **⚙ → 供应商** 中切换后，接口地址、模型列表和显示的 API Key 会随之调整。两家供应商的 Key 分别存储。
 
-Open `demo.html?ocleet=1` in a browser. It stubs the Tampermonkey APIs with a canned
-streaming reply, so you can preview the panel with **no key and no network**.
+当前模型如果不在新供应商的候选列表中，脚本会选择新列表的第一项，**请在切换后再次确认模型**。目前没有为每个供应商分别记忆上次选择的模型。
 
-## 存入 LeetNote（可选）
+模型候选写在源码的 `ZHIPU_MODELS` 和 `OPENCODE_MODELS` 中，不会实时查询服务端模型列表。可用性以实际请求结果为准。
 
-配合本机的 [LeetNote](https://github.com/mzzzmnq/leetnote)，可以把**当前题目 + 编辑器代码 +
-最近一次 AI 讲解**一键存成一篇笔记，并按 `slug` 关联题单里已有的题目（重复导入会更新同一篇，不会重复建）。
+### 接口兼容范围
 
-1. 在 LeetNote 里生成一把长期令牌（明文只显示一次）：
+脚本只实现了兼容 OpenAI Chat Completions 的请求方式：
+
+```text
+POST <接口地址>/chat/completions
+Authorization: Bearer <当前供应商的 API Key>
+```
+
+接口地址填写基础路径，不要重复添加 `/chat/completions`。当前未实现 `/messages`、`/responses` 或图像、文件上传。
+
+设置中允许手动改接口地址，但自定义供应商支持尚不完整：供应商和 Key 的归属仍按源码规则识别，不会为任意地址自动创建独立凭据。修改地址前应确认目标服务，以及当前将使用的 Key。
+
+### 连接状态的含义
+
+- 智谱等非 OpenCode 地址：初始化时只检查有没有填 Key；认证和模型可用性在发送消息时验证。
+- OpenCode Go：还会请求 `/usage` 检查 Key，检查超时为 20 秒。
+- 对话请求超时为 180 秒。
+
+状态显示正常不等于所有模型都已验证可用。
+
+## 题目与代码如何读取
+
+题目内容通过页面 DOM 选择器识别。代码读取按以下顺序尝试：
+
+1. **当前编辑器模型**：页面公开 Monaco 编辑器接口时，查找可见、可编辑的实例，优先选择当前有输入焦点或最近获得焦点的编辑器。
+2. **唯一可识别模型**：只公开模型列表时，在候选模型明确唯一的情况下读取；不再按代码长度猜测当前模型。
+3. **可见代码片段**：无法取得完整模型时，从可确定的编辑器 DOM 中读取已渲染代码行。
+
+每次读取都会重新获取模型内容，不保存第一次读取的代码快照。编辑器被清空时，也不会回退到其他旧模型中的代码。
+
+如果面板出现 **“未获取完整代码”**，表示当前读取不可视为完整源码。Monaco 按视口渲染内容，滚动、折行等因素都可能影响 DOM 片段。此时请手动复制完整代码到聊天输入框。
+
+目前给模型附带的题目描述和自动读取代码各最多 **8,000 字符**。面板显示的是读取到的代码字符数，不能据此判断长代码是否已完整发送。
+
+## 存入 LeetNote
+
+这是可选功能，不影响 AI 对话。需要自行运行支持 `/api/v1/import/note` 的 [LeetNote](https://github.com/mzzzmnq/leetnote) 服务。
+
+### 配置步骤
+
+1. 启动 LeetNote，并按服务端说明生成访问令牌。原有配套命令示例为：
 
    ```powershell
    cd leetnote-api
    go run ./cmd/token -user <你的用户名> -name "openleet 插件"
    ```
 
-2. 在本脚本面板点 **⚙**，填入 **LeetNote 地址**（默认 `http://127.0.0.1:8080`）和 **令牌**（`ln_…`）。
-3. 点面板里的 **存入 LeetNote**。
+   命令在 LeetNote 项目中执行，不是在 openleet 目录中执行；具体以所用服务端版本为准。
 
-令牌只留在 Tampermonkey 存储里；请求经 `GM_xmlhttpRequest` 直达本机 LeetNote
-（脚本元数据里因此加了 `@connect 127.0.0.1` / `@connect localhost`，以扩展层绕过 CORS）。
-LeetNote 没在跑或令牌无效时，面板会给出明确提示。
+2. 在 openleet 的 **⚙** 中填写 **LeetNote 地址**（默认 `http://127.0.0.1:8080`）和 **LeetNote 令牌**。
+3. 按需勾选 **导入时把最近一次 AI 讲解写进笔记正文**。
+4. 点击 **存入 LeetNote**，查看面板中的成功或错误提示。
 
-## Notes / limits
+### 导出内容
 
-- The userscript must be installed via Tampermonkey (or a compatible manager);
-  loaded as a plain page script it cannot bypass CORS.
-- The request has a 180-second timeout.
-- Live model listing from `/v1/models` needs no key, but the endpoint protocol is not
-  exposed there, which is why the chat-model list is maintained by hand.
+- 题目 `slug`、标题、题号（能识别时）、难度和链接。
+- 当前读取到的非空代码，以及识别到的语言。
+- 可选的最近一次成功 AI 回答，作为 Markdown 笔记正文。
+
+脚本将数据发送到 `<LeetNote 地址>/api/v1/import/note`，展示服务端返回的新建、更新及关联结果。重复导入如何合并笔记由 LeetNote 服务端决定。题目完整描述目前不作为独立字段导出。
+
+**当前导出尚未阻止不完整代码片段提交。** 如果读取提示代码不完整，请先确认完整代码能够读取，再导出，避免把片段保存为解法。
+
+## 数据存储与请求流向
+
+```text
+LeetCode 题目页面
+  └─ openleet 用户脚本
+       ├─ GM_xmlhttpRequest → 所配置的模型接口
+       └─ GM_xmlhttpRequest → 所配置的 LeetNote 服务（点击导出时）
+```
+
+- 正常 Tampermonkey 环境中，设置、供应商 Key 和 LeetNote 令牌通过 `GM_getValue` / `GM_setValue` 存储。
+- AI 请求包含当前题目上下文、可选代码及保留的对话历史，发送至配置的模型接口；本项目不提供中转服务器。
+- LeetNote 令牌用于发往所配置 LeetNote 服务的请求。
+- 缺少 GM 存储接口时，代码保留了使用 `localStorage` 的降级方式；离线演示也使用 `localStorage`，不应在演示页填写真实密钥。
+
+`GM_xmlhttpRequest` 通过脚本管理器发起跨域请求，避免普通页面 `fetch` 受到目标服务 CORS 配置限制。源码的 `@connect *` 用于兼容手动配置接口地址，并另列了 `127.0.0.1` 和 `localhost`。
+
+## 离线演示
+
+演示页使用模拟题目、可编辑代码框和模拟请求，不需要真实 API Key，也不会调用真实模型。
+
+1. 下载或克隆项目。
+2. 打开本地 `demo.html`，在地址末尾加上 `?ocleet=1`。
+3. 点击 **⌘ AI 助手**，测试读取、聊天展示和代码复制。
+4. 修改演示代码框，再点 **读取题目** 检查字符数变化；也可清空代码验证空编辑器提示。
+
+如果浏览器限制本地文件访问，可在项目目录运行本地静态服务（需安装 Python）：
+
+```sh
+python -m http.server 8000 --bind 127.0.0.1
+```
+
+然后访问 `http://127.0.0.1:8000/demo.html?ocleet=1`。
+
+演示回答是预置内容，不会随提问或代码变化而重新推理，也不模拟成功导出到 LeetNote。演示页每次加载都会初始化演示配置。
+
+## 常见问题
+
+| 现象 | 排查方法 |
+| --- | --- |
+| 看不到助手入口 | 确认 Tampermonkey 和脚本已启用，地址在支持的 `/problems/*` 下；保存脚本后刷新页面 |
+| 提示没有 `GM_xmlhttpRequest` | 通过 Tampermonkey 安装，不要直接将源码粘贴到开发者控制台运行 |
+| 修改代码后仍读到旧内容 | 确认已更新至 2.3.1 并刷新页面；点击实际代码编辑器后重新读取，检查是否提示代码不完整 |
+| 提示未获取完整代码 | 页面可能未公开 Monaco 接口，或存在多个无法区分的编辑器；将完整代码粘贴到聊天输入框 |
+| 显示当前编辑器代码为空 | 当前识别的编辑器模型没有代码；确认选中的编辑器和语言是否正确 |
+| HTTP 401 或 403 | 检查当前供应商 Key 是否正确，以及账户是否有该接口或模型权限 |
+| HTTP 429 | 检查供应商限流或额度情况，稍后重试或选择可用模型 |
+| HTTP 404 或模型不存在 | 检查基础地址是否重复包含 `/chat/completions`，以及模型是否被当前端点支持 |
+| 状态正常但发送失败 | 非 OpenCode 地址没有启动时在线校验，仍需通过实际对话检查 Key 和模型 |
+| 180 秒超时或网络错误 | 检查目标地址、网络连接和服务可用性 |
+| 没有逐字显示回答 | 脚本管理器可能缓冲了响应，需等待完整返回；也可能是服务返回格式不兼容 |
+| LeetNote 导出失败 | 检查服务是否启动、地址和令牌是否正确；401 表示令牌校验失败 |
+
+反馈问题时，建议提供脚本版本、浏览器和脚本管理器版本、题目链接、操作步骤，以及面板错误提示。不要附上真实 API Key 或令牌。
+
+## 开发与测试
+
+### 项目结构
+
+```text
+openleet/
+├── openleet.user.js       # 主脚本：配置、题目读取、模型请求、面板与导出
+├── demo.html              # 离线演示：模拟题目、编辑器和油猴接口
+├── tests/
+│   └── reader.test.cjs    # 编辑器读取及请求上下文回归检查
+└── README.md             # 安装、配置与开发说明
+```
+
+项目没有构建步骤，也无需安装 npm 依赖。测试使用 Node.js 内置模块，在支持 `node --test` 的 Node.js 环境运行。
+
+```sh
+# 检查主脚本语法
+node --check openleet.user.js
+
+# 执行读取回归测试
+node --test tests/reader.test.cjs
+
+# 检查补丁空白错误（Git 工作区）
+git diff --check
+```
+
+当前 8 项测试覆盖：重复修改、缩短与清空代码，模型替换，隐藏或已销毁实例，最近焦点选择，只读对比编辑器，单模型兼容路径，DOM 片段标记和隔离，以及发送消息时的最新代码上下文。
+
+这些测试使用模拟对象，不等于真实 LeetCode 页面兼容性测试。修改读取逻辑后，应在实际页面补充验证代码修改、切换语言、滚动编辑器和切题场景。
+
+### 常见修改位置
+
+| 需求 | 源码位置 |
+| --- | --- |
+| 调整默认配置 | `DEFAULTS` |
+| 调整供应商和模型列表 | `PROVIDERS`、`ZHIPU_MODELS`、`OPENCODE_MODELS` |
+| 修改三种模式提示词 | `BASE_SYSTEM`、`SKILLS` |
+| 修复题目或代码读取 | `readTitle`、`readDescription`、`readCode`、`readProblem` |
+| 调整上下文和请求 | `buildSystem`、`onSend`、`directChat` |
+| 修改导出行为 | `importToLeetNote` |
+| 修改面板样式 | `CSS` 与 UI 创建部分 |
+
+## 已知限制
+
+- 题目和编辑器识别依赖 LeetCode 页面结构及可访问接口，站点更新可能影响兼容性。
+- DOM 降级读取仅覆盖已渲染片段；LeetNote 导出尚未阻止这类片段提交。
+- 自动附带的题目描述和代码各截取前 8,000 字符，当前没有独立的长内容截断提示。
+- 每次成功回答后，对话历史最多保留最近 24 条消息；刷新会丢失聊天。
+- 生成期间清空聊天或切换题目不会取消在途请求，旧请求完成后可能进入新对话历史。建议等待回答结束再切题或清空。
+- 流式解析当前按 LF 空行分帧，对仅使用 CRLF 分隔的事件流仍需完善兼容。
+- 自定义接口的凭据隔离、模型维护和完整性提示仍有改进空间。
+
+## 版本记录
+
+### 2.3.1
+
+- 优先读取当前可见、可编辑的 Monaco 实例，不再按模型代码长度选择。
+- 每次重新读取模型，支持修改、缩短、清空和模型替换。
+- DOM 降级读取限定到单个可识别编辑器，并在面板和模型上下文中标记不完整内容。
+- 离线演示增加可编辑代码框。
+- 增加 8 项读取与发送上下文回归测试。
+- README 改为详细中文版，补充更新方法、配置说明和已知限制。
+
+### 2.3.0
+
+- 提供智谱 GLM / OpenCode Go 供应商切换。
+- 按内置供应商分别保存 API Key，并联动接口地址与模型候选。
