@@ -1,0 +1,37 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+
+  // ==========================================================================
+  // openleet 项目配置
+  //
+  // 注意:这份文件对「本目录下的所有 OpenCode 会话」都生效,包括你自己手敲的
+  // 交互会话。下面的 deny 规则会拦掉你的手动操作 —— 需要时删掉对应那一行。
+  // ==========================================================================
+
+  // --------------------------------------------------------------------------
+  // 无人值守护栏
+  //
+  // auto-dev.ps1 用 `opencode run --auto` 跑,而 --auto 的意思是
+  // 「自动批准所有未被显式 deny 的权限请求」。
+  // 也就是说 —— 这里写 ask 是**挡不住**自动化的,只有 deny 才算护栏。
+  // --------------------------------------------------------------------------
+  "permissions": [
+    // 自动化循环只在本机分支上提交,永不推送。要手动 push 时先注释掉这一行。
+    { "action": "shell", "resource": "git push *", "effect": "deny" },
+    { "action": "shell", "resource": "git reset --hard *", "effect": "deny" },
+    { "action": "shell", "resource": "rm -rf *", "effect": "deny" },
+    { "action": "read", "resource": "*.env", "effect": "deny" },
+    { "action": "read", "resource": "*.env.*", "effect": "deny" }
+  ],
+
+  "agents": {
+    // auto-dev.ps1 专用的执行者:单条任务、步数有上限,避免无人值守时无限空转。
+    // 故意不设置 system —— 设置非空 system 会替换掉 provider 的基座提示词,
+    // 反而削弱编码能力。任务约束由驱动脚本的 prompt 提供。
+    "auto-dev": {
+      "description": "无人值守的单任务执行者,由 auto-dev.ps1 调用",
+      "mode": "primary",
+      "steps": 40
+    }
+  }
+}
