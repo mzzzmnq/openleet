@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.3.1
+// @version      2.4.0
 // @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.5-Flash，免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -92,14 +92,20 @@
     },
     set(key, value) {
       try {
-        if (typeof GM_setValue === "function") return GM_setValue(key, value);
+        if (typeof GM_setValue === "function") {
+          GM_setValue(key, value);
+          return true;
+        }
       } catch {
-        /* ignore */
+        // Do not report a successful fallback write that GM_getValue would
+        // never read back on the next visit.
+        return false;
       }
       try {
         localStorage.setItem("ocleet:" + key, JSON.stringify(value));
+        return true;
       } catch {
-        /* ignore */
+        return false;
       }
     },
   };
@@ -598,6 +604,7 @@
 .ocleet-icon{background:transparent;border:none;color:#9aa0b4;cursor:pointer;font-size:15px;padding:4px 7px;border-radius:8px}
 .ocleet-icon:hover{background:rgba(255,255,255,.08);color:#fff}
 .ocleet-settings{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:8px}
+.ocleet-settings[hidden]{display:none}
 .ocleet-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#9aa0b4}
 .ocleet-field input,.ocleet-field select{background:#0c0e15;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e7e9f0;padding:6px 8px;font:inherit;font-size:12.5px}
 .ocleet-check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#c3c7d4}
@@ -675,6 +682,7 @@
     </div>
     <div class="ocleet-tabs" data-ocleet="tabs"></div>
     <div class="ocleet-problem" data-ocleet="problem" hidden></div>
+    <div class="ocleet-muted" data-ocleet="chat-status" style="padding:6px 12px 0;font-size:11px" aria-live="polite"></div>
     <div class="ocleet-messages" data-ocleet="messages"></div>
     <div class="ocleet-composer">
       <textarea data-ocleet="input" rows="3"></textarea>
@@ -696,6 +704,7 @@
   const sendBtn = $("send");
   const dot = $("dot");
   const problemEl = $("problem");
+  const chatStatusEl = $("chat-status");
   const tabsEl = $("tabs");
   const modelSelect = $("model");
   const apiKeyInput = $("apikey");
@@ -708,8 +717,98 @@
   const leetnoteTokenInput = $("leetnote-token");
   const includeAiEl = $("include-ai");
 
+  /* ---------------------------------------------------- conversation state */
+  const MAX_SAVED_MESSAGES = 200;
   let history = [];
   let busy = false;
+  let conversation = null;
+  let activeRequest = null;
+  let saveTimer = 0;
+
+  function conversationKey() {
+    const slug = currentSlug() || (IS_DEMO ? "demo:" + location.pathname : null);
+    return slug ? `conversation:v1:${location.hostname.replace(/^www\./, "")}:${slug}` : null;
+  }
+
+  function loadConversation(key) {
+    const saved = key ? store.get(key, null) : null;
+    const messages = saved?.version === 1 && Array.isArray(saved.messages)
+      ? saved.messages.filter((m) => m && (m.role === "user" || m.role === "assistant") && typeof m.content === "string")
+        .slice(-MAX_SAVED_MESSAGES).map((m) => ({
+          role: m.role,
+          content: m.content,
+          status: m.role === "user" ? "complete" : (["complete", "error", "interrupted"].includes(m.status) ? m.status : "interrupted"),
+          error: typeof m.error === "string" ? m.error : "",
+        }))
+      : [];
+    return { key, messages, draft: saved?.version === 1 && typeof saved.draft === "string" ? saved.draft : "" };
+  }
+
+  function saveConversation() {
+    clearTimeout(saveTimer);
+    saveTimer = 0;
+    if (!conversation?.key) {
+      chatStatusEl.textContent = "请在题目页使用，对话按题目自动保存";
+      return;
+    }
+    if (history.length > MAX_SAVED_MESSAGES) history.splice(0, history.length - MAX_SAVED_MESSAGES);
+    const ok = store.set(conversation.key, {
+      version: 1, messages: history, draft: conversation.draft, updatedAt: Date.now(),
+    });
+    chatStatusEl.textContent = ok ? "本题对话已自动保存" : "对话保存失败，请先复制重要内容再关闭页面";
+  }
+
+  function scheduleConversationSave() {
+    if (saveTimer) return;
+    chatStatusEl.textContent = "正在保存本题对话…";
+    saveTimer = setTimeout(saveConversation, 500);
+  }
+
+  function flushConversationSave() {
+    if (saveTimer) saveConversation();
+  }
+
+  function syncConversation(force = false) {
+    const key = conversationKey();
+    if (!force && conversation && conversation.key === key) return false;
+    if (saveTimer) saveConversation();
+    activeRequest = null;
+    setBusy(false);
+    conversation = loadConversation(key);
+    history = conversation.messages;
+    inputEl.value = conversation.draft;
+    resetMessages();
+    for (const message of history) {
+      if (message.content) addMessage(message.role, message.content);
+      if (message.status !== "complete") addMessage("error", message.error || "上次回答未完成，已恢复收到的内容；可以重新提问。");
+    }
+    chatStatusEl.textContent = key
+      ? (history.length || conversation.draft ? "已恢复本题对话和草稿 · 自动保存" : "本题对话和草稿将自动保存")
+      : "请在题目页使用，对话按题目自动保存";
+    problemEl.hidden = true;
+    return true;
+  }
+
+  function clearConversation() {
+    syncConversation();
+    activeRequest = null;
+    setBusy(false);
+    history = [];
+    conversation.messages = history;
+    conversation.draft = "";
+    inputEl.value = "";
+    saveConversation();
+    resetMessages();
+  }
+
+  function chatHistory() {
+    const messages = history.filter((m) => m.status === "complete")
+      .slice(-24).map(({ role, content }) => ({ role, content }));
+    // A bounded context should start with a user turn.
+    while (messages[0]?.role === "assistant") messages.shift();
+    return messages;
+  }
+  /* ------------------------------------------------------ conversation UI */
 
   function setStatus(state) {
     dot.classList.remove("ok", "err");
@@ -873,33 +972,61 @@
   }
 
   async function onSend() {
-    if (busy) return;
+    // Capture what the user chose to send before a pending SPA switch restores
+    // the destination problem's draft.
     const text = inputEl.value.trim();
+    syncConversation();
+    if (busy) return;
     if (!text) return;
     setBusy(true);
     inputEl.value = "";
+    conversation.draft = "";
     addMessage("user", text);
-    history.push({ role: "user", content: text });
+    history.push({ role: "user", content: text, status: "complete" });
 
     const bubble = addAssistant();
-    const problem = readProblem();
-    renderProblemChip(problem);
-    const payload = {
-      model: cfg.model,
-      stream: true,
-      messages: [{ role: "system", content: buildSystem(cfg.mode, problem) }, ...history],
-    };
+    const reply = { role: "assistant", content: "", status: "streaming" };
+    history.push(reply);
+    const request = { conversation };
+    activeRequest = request;
+    const isCurrent = () => activeRequest === request && conversation === request.conversation && conversationKey() === conversation.key;
+    saveConversation();
     try {
-      await directChat(payload, bubble.onDelta, bubble.onReasoning);
+      const problem = readProblem();
+      renderProblemChip(problem);
+      const payload = {
+        model: cfg.model,
+        stream: true,
+        messages: [{ role: "system", content: buildSystem(cfg.mode, problem) }, ...chatHistory()],
+      };
+      await directChat(payload, (delta) => {
+        if (!isCurrent()) return;
+        reply.content += delta;
+        bubble.onDelta(delta);
+        scheduleConversationSave();
+      }, (delta) => {
+        if (isCurrent()) bubble.onReasoning(delta);
+      });
+      if (!isCurrent()) return;
+      reply.status = "complete";
       bubble.done();
       setStatus("ok");
-      history.push({ role: "assistant", content: bubble.text() });
-      if (history.length > 24) history.splice(0, history.length - 24);
+      saveConversation();
     } catch (err) {
-      bubble.fail(err.message || String(err));
+      if (!isCurrent()) return;
+      reply.status = reply.content ? "interrupted" : "error";
+      reply.error = err.message || String(err);
+      if (reply.content) {
+        bubble.done();
+        addMessage("error", reply.error);
+      } else bubble.fail(reply.error);
       setStatus("err");
+      saveConversation();
     } finally {
-      setBusy(false);
+      if (activeRequest === request) {
+        activeRequest = null;
+        setBusy(false);
+      }
     }
   }
 
@@ -952,12 +1079,13 @@
 
   function lastAssistantText() {
     for (let i = history.length - 1; i >= 0; i -= 1) {
-      if (history[i].role === "assistant" && history[i].content) return history[i].content;
+      if (history[i].role === "assistant" && history[i].status === "complete" && history[i].content) return history[i].content;
     }
     return "";
   }
 
   async function importToLeetNote() {
+    syncConversation();
     const token = (cfg.leetnoteToken || "").trim();
     if (!token) {
       addMessage("assistant", "还没配置 LeetNote 令牌。点右上角 ⚙ 填入（在 LeetNote 里用 `go run ./cmd/token -user <用户名>` 生成）。");
@@ -1078,6 +1206,7 @@
   }
 
   launcher.addEventListener("click", () => {
+    syncConversation();
     panel.hidden = !panel.hidden;
     if (!panel.hidden && cfg.autoRead) {
       const problem = readProblem();
@@ -1088,11 +1217,10 @@
   $("settings").addEventListener("click", () => (settingsBox.hidden = !settingsBox.hidden));
   $("send").addEventListener("click", onSend);
   $("import").addEventListener("click", importToLeetNote);
-  $("clear").addEventListener("click", () => {
-    history = [];
-    resetMessages();
-  });
+  $("clear").title = "清除本题已保存的对话和草稿";
+  $("clear").addEventListener("click", clearConversation);
   $("read").addEventListener("click", () => {
+    syncConversation();
     const problem = readProblem();
     renderProblemChip(problem);
     const codeStatus = problem.codeSource === "model"
@@ -1105,6 +1233,17 @@
       e.preventDefault();
       onSend();
     }
+  });
+  inputEl.addEventListener("input", () => {
+    const draft = inputEl.value;
+    syncConversation();
+    inputEl.value = draft;
+    conversation.draft = draft;
+    scheduleConversationSave();
+  });
+  window.addEventListener("pagehide", flushConversationSave);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) flushConversationSave();
   });
   apiKeyInput.addEventListener("change", () => {
     cfg.keys[currentProvider()] = apiKeyInput.value.trim();
@@ -1173,18 +1312,13 @@
   includeAiEl.checked = cfg.includeAi;
   renderTabs();
   fillModels(modelsForBase());
-  resetMessages();
+  syncConversation(true);
 
   verifyKey();
 
-  // LeetCode is a SPA: reset the conversation when the problem changes.
-  let lastSlug = currentSlug();
+  // LeetCode is a SPA: restore the conversation belonging to the new problem.
   setInterval(() => {
-    const slug = currentSlug();
-    if (slug === lastSlug) return;
-    lastSlug = slug;
-    history = [];
-    resetMessages();
+    if (!syncConversation()) return;
     if (!panel.hidden && cfg.autoRead) renderProblemChip(readProblem());
   }, 1200);
 })();

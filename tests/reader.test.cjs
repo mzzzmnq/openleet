@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
+const { installConversation } = require('./conversation-harness.cjs');
 
 const source = fs.readFileSync(path.join(__dirname, '../openleet.user.js'), 'utf8');
 const reader = source.slice(source.indexOf('  function readLanguageLabel()'), source.indexOf('  function currentSlug()'));
@@ -107,7 +108,9 @@ test('each chat request receives the latest code through readProblem and buildSy
   const { context } = setup({ getModels: () => [{ ...model(''), getValue: () => value }] });
   const requests = [];
   Object.assign(context, {
-    location: { pathname: '/problems/two-sum/', href: 'https://leetcode.com/problems/two-sum/' },
+    IS_DEMO: false, location: { hostname: 'leetcode.com', pathname: '/problems/two-sum/', href: 'https://leetcode.com/problems/two-sum/' },
+    store: { get: () => null, set: () => true }, clearTimeout, setTimeout,
+    chatStatusEl: {}, problemEl: {}, resetMessages: () => {},
     readTitle: () => 'Two Sum', readDifficulty: () => 'Easy', readTags: () => [], readDescription: () => 'Description',
     BASE_SYSTEM: 'Assistant', SKILLS: { hint: { system: 'Hint' } }, cfg: { mode: 'hint', model: 'test', includeCode: true },
     busy: false, history: [], inputEl: { value: 'Explain' }, sendBtn: {},
@@ -116,7 +119,10 @@ test('each chat request receives the latest code through readProblem and buildSy
     directChat: async (payload) => { requests.push(payload); },
   });
   vm.runInContext(source.slice(source.indexOf('  function currentSlug()'), source.indexOf('  /* ------------------------------------------------------------- upstream API */')), context);
+  installConversation(context);
   vm.runInContext(source.slice(source.indexOf('  function buildSystem('), source.indexOf('  /* ---------------------------------------------------------- LeetNote export */')), context);
+  context.syncConversation(true);
+  context.inputEl.value = 'Explain';
   await context.onSend();
   value = 'SECOND_VERSION';
   context.inputEl.value = 'Explain again';
