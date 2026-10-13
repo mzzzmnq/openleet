@@ -69,12 +69,18 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $dirty = git status --porcelain
-if ($dirty) { throw "工作区不干净,先提交或 stash 再跑。`n$dirty" }
+if ($dirty -and -not $DryRun) { throw "工作区不干净,先提交或 stash 再跑。`n$dirty" }
+if ($dirty) { Log "提示:工作区不干净,正式跑之前需要先提交或 stash。" }
 
-git checkout -B $Branch 2>$null | Out-Null
-if ($LASTEXITCODE -ne 0) { throw "切到分支 $Branch 失败" }
-Log "目标仓库:$Repo"
-Log "工作分支:$Branch  模型:$Model  agent:$Agent"
+if (-not $DryRun) {
+  git checkout -B $Branch 2>$null | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw "切到分支 $Branch 失败" }
+  Log "目标仓库:$Repo"
+  Log "工作分支:$Branch  模型:$Model  agent:$Agent"
+} else {
+  Log "目标仓库:$Repo"
+  Log "[DryRun] 只读预览,不切换分支、不调用模型"
+}
 
 # ---------------------------------------------------------------- 主循环
 $lastVerifyOutput = ""
