@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.4.0
-// @description  在 LeetCode 题目页嵌入 AI 对话面板（默认智谱 GLM-4.5-Flash，免费）：分步提示 / 讲代码+复杂度 / Debug 报错。纯前端，直接用你自己的 API key。
+// @version      2.5.0
+// @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / Python 知识点。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
 // @match        https://leetcode.cn/problems/*
@@ -35,10 +35,11 @@
  * 浏览器拦；油猴的 GM_xmlhttpRequest 在扩展层发请求，可绕过 CORS。API key 存在
  * 油猴自己的存储里（GM_setValue），不写进页面、只发给你配置的那个端点。
  *
- * 三种 skill：
+ * 四种 skill：
  *   hint    分步提示（Socratic）
  *   explain 讲代码 + 复杂度
  *   debug   Debug 报错
+ *   knowledge Python 语法与知识点
  *
  * 注意：必须通过 Tampermonkey 安装。若检测不到 GM_xmlhttpRequest（例如被当作普通
  * 网页脚本加载），会退回 fetch —— 那样会因 CORS 失败。
@@ -238,6 +239,23 @@
         "- 先说清你认为的根因，再给最小的修改建议（尽量只改必要的几行）。",
         "- 缺少信息时，明确列出需要用户补什么：哪组输入、期望输出、实际输出。",
         "- 不要顺手重写整个解法。",
+      ].join("\n"),
+    },
+    knowledge: {
+      label: "Python 知识点",
+      tip: "直接问 Python 语法，或贴一小段代码，不用读取题目。",
+      placeholder: "例如：nums[::-1] 是什么意思？enumerate 怎么用？is 和 == 有什么区别？",
+      quick: "用简单例子讲解 Python 列表切片的用法",
+      system: [
+        "你是一位耐心的 Python 编程老师，用简体中文解释 Python 语法、内置函数、标准库和语言特性。",
+        "模式：Python 知识点。",
+        "- 优先回答用户最新询问的知识点，不需要围绕 LeetCode 题目；此前的解题对话只在与本次问题相关时参考。",
+        "- 默认使用 Python 3；涉及版本差异时说明适用版本，不确定时明确说明。",
+        "- 先用一两句话解释概念，再给一个最小、可独立运行的 Python 示例和预期输出，最后说明一两个常见易错点。",
+        "- 代码使用带 python 标记的 Markdown 代码块，行内语法用反引号；输出是推导结果，不要声称已经运行代码。",
+        "- 用户贴出表达式或短代码时，逐项解释其语法和求值过程；比较两种写法时说明区别和适用场景。",
+        "- 回答简洁、适合初学者；除非用户要求，不要展开整道算法题的解法。",
+        "- 此模式不自动附带题目和编辑器代码；用户指代的代码未出现在对话中时，请他粘贴需要解释的片段。",
       ].join("\n"),
     },
   };
@@ -608,7 +626,7 @@
 .ocleet-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#9aa0b4}
 .ocleet-field input,.ocleet-field select{background:#0c0e15;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e7e9f0;padding:6px 8px;font:inherit;font-size:12.5px}
 .ocleet-check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#c3c7d4}
-.ocleet-tabs{display:flex;gap:6px;padding:9px 12px 0}
+.ocleet-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:9px 12px 0}
 .ocleet-tab{flex:1;padding:7px 8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:#aeb3c4;border-radius:9px;cursor:pointer;font:600 12px/1.2 inherit}
 .ocleet-tab.active{background:linear-gradient(135deg,rgba(91,124,250,.3),rgba(138,92,246,.3));border-color:rgba(138,120,255,.55);color:#fff}
 .ocleet-problem{margin:9px 12px 0;padding:7px 10px;border-radius:9px;background:rgba(91,124,250,.1);border:1px solid rgba(91,124,250,.25);font-size:12px;color:#c9cfe4;display:flex;gap:6px;align-items:center}
@@ -639,6 +657,7 @@
 .ocleet-btns{display:flex;gap:6px;flex-shrink:0}
 .ocleet-btn{border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dfe2ec;padding:6px 11px;cursor:pointer;font:600 12.5px/1 inherit}
 .ocleet-btn:hover{background:rgba(255,255,255,.12)}
+.ocleet-btn:disabled{opacity:.5;cursor:not-allowed}
 .ocleet-btn.primary{background:linear-gradient(135deg,#5b7cfa,#8a5cf6);border-color:transparent;color:#fff}
 .ocleet-btn.primary[disabled]{opacity:.55;cursor:default}
 .ocleet-cursor{display:inline-block;width:7px;height:14px;background:#8a5cf6;vertical-align:-2px;animation:ocleet-blink 1s steps(2) infinite}
@@ -917,7 +936,7 @@
   }
 
   function renderProblemChip(problem) {
-    if (!problem || !problem.title) {
+    if (cfg.mode === "knowledge" || !problem || !problem.title) {
       problemEl.hidden = true;
       return;
     }
@@ -941,7 +960,7 @@
     problemEl.appendChild(meta);
   }
 
-  const WELCOME = "选一个模式，点「读取题目」，然后开始提问。我会自动带上当前题目的描述和你编辑器里的代码（可在设置里关掉）。";
+  const WELCOME = "解题时可点「读取题目」，我会自动带上题目和可选的编辑器代码；询问语法时选择「Python 知识点」直接提问，也可以粘贴代码片段。";
 
   function resetMessages() {
     messagesEl.textContent = "";
@@ -949,6 +968,7 @@
   }
 
   function buildSystem(mode, problem) {
+    if (mode === "knowledge") return SKILLS.knowledge.system;
     const lines = [BASE_SYSTEM, SKILLS[mode].system, "", "----- 当前题目上下文 -----"];
     lines.push(`【题目】${problem.title || "(未识别)"}${problem.difficulty ? `（${problem.difficulty}）` : ""}`);
     if (problem.url) lines.push(`【链接】${problem.url}`);
@@ -992,7 +1012,7 @@
     const isCurrent = () => activeRequest === request && conversation === request.conversation && conversationKey() === conversation.key;
     saveConversation();
     try {
-      const problem = readProblem();
+      const problem = cfg.mode === "knowledge" ? null : readProblem();
       renderProblemChip(problem);
       const payload = {
         model: cfg.model,
@@ -1153,6 +1173,7 @@
 
   /* ------------------------------------------------------------------- wiring */
   function renderTabs() {
+    if (!Object.hasOwn(SKILLS, cfg.mode)) cfg.mode = "hint";
     tabsEl.textContent = "";
     for (const [key, skill] of Object.entries(SKILLS)) {
       const tab = document.createElement("button");
@@ -1170,6 +1191,9 @@
     }
     inputEl.placeholder = SKILLS[cfg.mode].placeholder;
     $("tip").textContent = SKILLS[cfg.mode].tip;
+    $("read").disabled = cfg.mode === "knowledge";
+    $("read").title = cfg.mode === "knowledge" ? "知识点模式可直接提问，无需读取题目" : "读取当前题目和编辑器代码";
+    problemEl.hidden = true;
   }
 
   function fillModels(models) {
@@ -1208,7 +1232,7 @@
   launcher.addEventListener("click", () => {
     syncConversation();
     panel.hidden = !panel.hidden;
-    if (!panel.hidden && cfg.autoRead) {
+    if (!panel.hidden && cfg.autoRead && cfg.mode !== "knowledge") {
       const problem = readProblem();
       renderProblemChip(problem);
     }
@@ -1319,6 +1343,6 @@
   // LeetCode is a SPA: restore the conversation belonging to the new problem.
   setInterval(() => {
     if (!syncConversation()) return;
-    if (!panel.hidden && cfg.autoRead) renderProblemChip(readProblem());
+    if (!panel.hidden && cfg.autoRead && cfg.mode !== "knowledge") renderProblemChip(readProblem());
   }, 1200);
 })();

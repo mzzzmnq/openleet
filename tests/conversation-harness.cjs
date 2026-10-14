@@ -25,7 +25,7 @@ function setup(saved = new Map(), options = {}) {
     document: { hidden: false, addEventListener: (name, fn) => { documentEvents[name] = fn; } },
     inputEl: { value: '', addEventListener: (name, fn) => { inputEvents[name] = fn; } },
     sendBtn: {}, chatStatusEl: {}, problemEl: {},
-    BASE_SYSTEM: 'Assistant', SKILLS: { hint: { system: 'Hint' } }, cfg: { mode: 'hint', model: 'test', includeCode: true },
+    cfg: { mode: 'hint', model: 'test', includeCode: true },
     readProblem: () => ({ title: 'Problem', code: 'CURRENT_CODE', codeSource: 'model' }),
     resetMessages: () => { rendered.length = 0; },
     addMessage: (role, content) => { rendered.push({ role, content }); },
@@ -39,6 +39,7 @@ function setup(saved = new Map(), options = {}) {
   });
   vm.runInContext(source.slice(source.indexOf('  const store ='), source.indexOf('  /* ----------------------------------------------------------------- config */')), context);
   vm.runInContext(source.slice(source.indexOf('  function currentSlug()'), source.indexOf('  function readProblem()')), context);
+  vm.runInContext(source.slice(source.indexOf('  const BASE_SYSTEM ='), source.indexOf('  /* ---------------------------------------------------------------- markdown */')), context);
   installConversation(context);
   vm.runInContext(source.slice(source.indexOf('  function buildSystem('), source.indexOf('  /* ---------------------------------------------------------- LeetNote export */')), context);
   vm.runInContext(source.slice(source.indexOf('  inputEl.addEventListener("input"'), source.indexOf('  apiKeyInput.addEventListener')), context);
