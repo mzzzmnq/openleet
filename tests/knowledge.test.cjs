@@ -32,6 +32,7 @@ test('switching from Python questions to problem modes restores fresh problem co
     reads++;
     return { title: 'Current problem', code: 'CURRENT_EDITOR_CODE', codeSource: 'model', lang: 'python' };
   };
+  app.context.readCode = () => ({ code: 'CURRENT_EDITOR_CODE', codeSource: 'model', lang: 'python' });
   const first = app.send('enumerate 怎么用？');
   app.requests[0].onDelta('它可以同时提供索引和值。');
   app.requests[0].resolve();

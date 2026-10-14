@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.5.0
+// @version      2.6.0
 // @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / Python 知识点。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -243,7 +243,7 @@
     },
     knowledge: {
       label: "Python 知识点",
-      tip: "直接问 Python 语法，或贴一小段代码，不用读取题目。",
+      tip: "直接问 Python 语法，也可先读取当前代码。",
       placeholder: "例如：nums[::-1] 是什么意思？enumerate 怎么用？is 和 == 有什么区别？",
       quick: "用简单例子讲解 Python 列表切片的用法",
       system: [
@@ -255,7 +255,7 @@
         "- 代码使用带 python 标记的 Markdown 代码块，行内语法用反引号；输出是推导结果，不要声称已经运行代码。",
         "- 用户贴出表达式或短代码时，逐项解释其语法和求值过程；比较两种写法时说明区别和适用场景。",
         "- 回答简洁、适合初学者；除非用户要求，不要展开整道算法题的解法。",
-        "- 此模式不自动附带题目和编辑器代码；用户指代的代码未出现在对话中时，请他粘贴需要解释的片段。",
+        "- 此模式不附带题目；用户点击读取当前代码后，可附带编辑器代码供参考。用户指代的代码未出现在上下文中时，请他粘贴片段或点击读取当前代码。",
       ].join("\n"),
     },
   };
@@ -434,16 +434,20 @@
   }
 
   function readProblem() {
-    const codeContext = readCode();
     return {
       title: readTitle(),
       slug: currentSlug(),
       difficulty: readDifficulty(),
       tags: readTags(),
       description: readDescription(),
-      ...codeContext,
       url: location.href,
     };
+  }
+
+  function readChatContext(mode) {
+    const problem = mode === "knowledge" ? {} : readProblem();
+    const code = cfg.includeCode && (mode !== "knowledge" || codeRequested) ? readCode() : null;
+    return { ...problem, ...code };
   }
 
   /* ------------------------------------------------------------- upstream API */
@@ -613,7 +617,8 @@
   background:#12141c;color:#e7e9f0;border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:hidden;
   box-shadow:0 22px 70px rgba(0,0,0,.55);font:13px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
 .ocleet-panel[hidden]{display:none}
-.ocleet-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02)}
+.ocleet-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);cursor:grab;touch-action:none;user-select:none}
+.ocleet-head.ocleet-dragging{cursor:grabbing}
 .ocleet-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px}
 .ocleet-dot{width:8px;height:8px;border-radius:50%;background:#8b90a3}
 .ocleet-dot.ok{background:#37d67a;box-shadow:0 0 0 3px rgba(55,214,122,.18)}
@@ -655,6 +660,8 @@
 .ocleet-composer-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
 .ocleet-hint{font-size:11.5px;color:#8f95a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ocleet-btns{display:flex;gap:6px;flex-shrink:0}
+.ocleet-context-actions{display:flex;gap:6px;margin-bottom:8px}
+.ocleet-context-actions .ocleet-btn{flex:1;min-width:0}
 .ocleet-btn{border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dfe2ec;padding:6px 11px;cursor:pointer;font:600 12.5px/1 inherit}
 .ocleet-btn:hover{background:rgba(255,255,255,.12)}
 .ocleet-btn:disabled{opacity:.5;cursor:not-allowed}
@@ -678,7 +685,7 @@
   panel.setAttribute("data-ocleet", "panel");
   panel.hidden = true;
   panel.innerHTML = `
-    <div class="ocleet-head">
+    <div class="ocleet-head" data-ocleet="drag-handle" title="拖动标题栏移动窗口，双击恢复默认位置">
       <div class="ocleet-brand"><span class="ocleet-dot" data-ocleet="dot"></span><span>openleet</span></div>
       <div class="ocleet-actions">
         <button class="ocleet-icon" type="button" data-ocleet="settings" title="设置">⚙</button>
@@ -701,16 +708,23 @@
     </div>
     <div class="ocleet-tabs" data-ocleet="tabs"></div>
     <div class="ocleet-problem" data-ocleet="problem" hidden></div>
+    <div class="ocleet-problem" data-ocleet="code-status" hidden></div>
     <div class="ocleet-muted" data-ocleet="chat-status" style="padding:6px 12px 0;font-size:11px" aria-live="polite"></div>
     <div class="ocleet-messages" data-ocleet="messages"></div>
     <div class="ocleet-composer">
+      <div class="ocleet-context-actions">
+        <button class="ocleet-btn" type="button" data-ocleet="read">读取题目</button>
+        <button class="ocleet-btn" type="button" data-ocleet="read-code">读取当前代码</button>
+      </div>
       <textarea data-ocleet="input" rows="3"></textarea>
+      <div class="ocleet-context-actions" style="margin-top:8px">
+        <button class="ocleet-btn" type="button" data-ocleet="start-leetnote" title="通过本机启动器启动 LeetNote 全部服务">启动 LeetNote</button>
+        <button class="ocleet-btn" type="button" data-ocleet="import">存入 LeetNote</button>
+      </div>
       <div class="ocleet-composer-row">
         <span class="ocleet-hint" data-ocleet="tip"></span>
         <div class="ocleet-btns">
-          <button class="ocleet-btn" type="button" data-ocleet="read">读取题目</button>
           <button class="ocleet-btn" type="button" data-ocleet="clear">清空</button>
-          <button class="ocleet-btn" type="button" data-ocleet="import">存入 LeetNote</button>
           <button class="ocleet-btn primary" type="button" data-ocleet="send">发送</button>
         </div>
       </div>
@@ -723,6 +737,7 @@
   const sendBtn = $("send");
   const dot = $("dot");
   const problemEl = $("problem");
+  const codeStatusEl = $("code-status");
   const chatStatusEl = $("chat-status");
   const tabsEl = $("tabs");
   const modelSelect = $("model");
@@ -736,6 +751,56 @@
   const leetnoteTokenInput = $("leetnote-token");
   const includeAiEl = $("include-ai");
 
+  /* -------------------------------------------------------- panel position */
+  function setupPanelDrag(panel, handle) {
+    let position = store.get("panel-position", null);
+    if (!position || !Number.isFinite(position.x) || !Number.isFinite(position.y)) position = null;
+    let drag = null;
+    function place(x, y) {
+      const rect = panel.getBoundingClientRect();
+      position = {
+        x: Math.max(0, Math.min(x, Math.max(0, window.innerWidth - rect.width))),
+        y: Math.max(0, Math.min(y, Math.max(0, window.innerHeight - rect.height))),
+      };
+      Object.assign(panel.style, { left: position.x + "px", top: position.y + "px", right: "auto", bottom: "auto" });
+    }
+    function restore() {
+      if (!panel.hidden && position) place(position.x, position.y);
+    }
+    function finish(event) {
+      if (!drag || (event && event.pointerId !== drag.id)) return;
+      const id = drag.id;
+      drag = null;
+      handle.classList.remove("ocleet-dragging");
+      if (handle.hasPointerCapture(id)) handle.releasePointerCapture(id);
+      store.set("panel-position", position);
+    }
+    handle.addEventListener("pointerdown", event => {
+      if (event.button !== 0 || event.isPrimary === false || event.target.closest("button")) return;
+      const rect = panel.getBoundingClientRect();
+      drag = { id: event.pointerId, x: event.clientX - rect.left, y: event.clientY - rect.top };
+      handle.setPointerCapture(event.pointerId);
+      handle.classList.add("ocleet-dragging");
+      event.preventDefault();
+    });
+    handle.addEventListener("pointermove", event => {
+      if (!drag || event.pointerId !== drag.id) return;
+      place(event.clientX - drag.x, event.clientY - drag.y);
+    });
+    for (const name of ["pointerup", "pointercancel", "lostpointercapture"]) handle.addEventListener(name, finish);
+    handle.addEventListener("dblclick", event => {
+      if (event.target.closest("button")) return;
+      finish();
+      position = null;
+      for (const key of ["left", "top", "right", "bottom"]) panel.style[key] = "";
+      store.set("panel-position", null);
+    });
+    window.addEventListener("resize", () => { finish(); restore(); });
+    window.addEventListener("blur", () => finish());
+    return restore;
+  }
+  const restorePanelPosition = setupPanelDrag(panel, $("drag-handle"));
+
   /* ---------------------------------------------------- conversation state */
   const MAX_SAVED_MESSAGES = 200;
   let history = [];
@@ -743,6 +808,8 @@
   let conversation = null;
   let activeRequest = null;
   let saveTimer = 0;
+  let codeRequested = false;
+  let latestCodeContext = null;
 
   function conversationKey() {
     const slug = currentSlug() || (IS_DEMO ? "demo:" + location.pathname : null);
@@ -805,6 +872,9 @@
       ? (history.length || conversation.draft ? "已恢复本题对话和草稿 · 自动保存" : "本题对话和草稿将自动保存")
       : "请在题目页使用，对话按题目自动保存";
     problemEl.hidden = true;
+    codeRequested = false;
+    latestCodeContext = null;
+    codeStatusEl.hidden = true;
     return true;
   }
 
@@ -816,6 +886,9 @@
     conversation.messages = history;
     conversation.draft = "";
     inputEl.value = "";
+    codeRequested = false;
+    latestCodeContext = null;
+    codeStatusEl.hidden = true;
     saveConversation();
     resetMessages();
   }
@@ -951,31 +1024,51 @@
       diff.textContent = problem.difficulty;
       problemEl.appendChild(diff);
     }
-    const codeLen = (problem.code || "").trim().length;
-    const meta = document.createElement("span");
-    meta.className = "ocleet-muted";
-    meta.textContent = cfg.includeCode
-      ? `· 代码 ${codeLen} 字符${problem.codeIncomplete ? "（未获取完整代码）" : ""}`
-      : "· 不发送代码";
-    problemEl.appendChild(meta);
   }
 
-  const WELCOME = "解题时可点「读取题目」，我会自动带上题目和可选的编辑器代码；询问语法时选择「Python 知识点」直接提问，也可以粘贴代码片段。";
+  function renderCodeChip(code) {
+    codeStatusEl.hidden = !code;
+    if (!code) return;
+    const count = (code.code || "").trim().length;
+    codeStatusEl.textContent = `当前代码${code.lang ? `（${code.lang}）` : ""}：${count} 字符${code.codeIncomplete ? " · 未获取完整代码" : ""}${cfg.includeCode ? "" : " · 已关闭发送代码"}`;
+  }
+
+  function onReadProblem() {
+    syncConversation();
+    const problem = readProblem();
+    renderProblemChip(problem);
+    addMessage("assistant", `已读取题目 **${problem.title || "(未识别)"}**。需要查看编辑器内容时，请点「读取当前代码」。`);
+  }
+
+  function onReadCode() {
+    syncConversation();
+    codeRequested = true;
+    latestCodeContext = readCode();
+    renderCodeChip(latestCodeContext);
+    const codeStatus = latestCodeContext.codeSource === "model"
+      ? (latestCodeContext.code.trim() ? "已读取当前编辑器代码。" : "当前编辑器代码为空。")
+      : (latestCodeContext.code ? "只读到了编辑器可见的代码片段，可能不完整；可以手动粘贴完整代码。" : "没读到编辑器代码，可以手动贴给我。");
+    addMessage("assistant", codeStatus + (cfg.includeCode ? "" : "设置中已关闭发送代码，启用后才会附带到 AI 请求。"));
+  }
+
+  const WELCOME = "「读取题目」只读取题目信息，「读取当前代码」只读取编辑器内容。询问语法时可选择「Python 知识点」直接提问，或先读取代码再问。";
 
   function resetMessages() {
     messagesEl.textContent = "";
     addMessage("assistant", WELCOME);
   }
 
-  function buildSystem(mode, problem) {
-    if (mode === "knowledge") return SKILLS.knowledge.system;
-    const lines = [BASE_SYSTEM, SKILLS[mode].system, "", "----- 当前题目上下文 -----"];
-    lines.push(`【题目】${problem.title || "(未识别)"}${problem.difficulty ? `（${problem.difficulty}）` : ""}`);
-    if (problem.url) lines.push(`【链接】${problem.url}`);
-    if (problem.tags && problem.tags.length) lines.push(`【标签】${problem.tags.join("、")}`);
-    lines.push("", "【题目描述】");
-    lines.push((problem.description || "(未读取到题目描述；如果题目不是这道，请让用户把题目贴过来)").slice(0, 8000));
-    if (cfg.includeCode) {
+  function buildSystem(mode, problem = {}) {
+    const knowledge = mode === "knowledge";
+    const lines = knowledge ? [SKILLS.knowledge.system] : [BASE_SYSTEM, SKILLS[mode].system, "", "----- 当前题目上下文 -----"];
+    if (!knowledge) {
+      lines.push(`【题目】${problem.title || "(未识别)"}${problem.difficulty ? `（${problem.difficulty}）` : ""}`);
+      if (problem.url) lines.push(`【链接】${problem.url}`);
+      if (problem.tags && problem.tags.length) lines.push(`【标签】${problem.tags.join("、")}`);
+      lines.push("", "【题目描述】");
+      lines.push((problem.description || "(未读取到题目描述；如果题目不是这道，请让用户把题目贴过来)").slice(0, 8000));
+    }
+    if (cfg.includeCode && (!knowledge || problem.codeSource)) {
       if (problem.codeIncomplete) lines.push("注意：未获取到完整编辑器代码，以下可能仅是可见片段；不要把缺失部分判断为用户未实现。");
       lines.push("", `【用户当前代码${problem.lang ? `（${problem.lang}）` : ""}】`);
       lines.push("```" + (problem.lang || ""));
@@ -1012,8 +1105,10 @@
     const isCurrent = () => activeRequest === request && conversation === request.conversation && conversationKey() === conversation.key;
     saveConversation();
     try {
-      const problem = cfg.mode === "knowledge" ? null : readProblem();
+      const problem = readChatContext(cfg.mode);
       renderProblemChip(problem);
+      latestCodeContext = problem.codeSource ? problem : null;
+      renderCodeChip(latestCodeContext);
       const payload = {
         model: cfg.model,
         stream: true,
@@ -1074,6 +1169,66 @@
 
   const leetnoteBase = () => (cfg.leetnoteUrl || DEFAULTS.leetnoteUrl).replace(/\/+$/, "");
 
+  async function probeLeetNoteServices() {
+    const targets = [
+      ["API / 数据库", "http://127.0.0.1:8080/health"],
+      ["AI", "http://127.0.0.1:8000/health"],
+      ["网页", "http://localhost:5173/"],
+    ];
+    return Promise.all(targets.map(([name, url]) => new Promise(resolve => {
+      GM_xmlhttpRequest({ method: "GET", url, timeout: 2500,
+        onload: response => {
+          let ready = response.status >= 200 && response.status < 300;
+          if (name !== "网页" && ready) {
+            try { const data = JSON.parse(response.responseText); ready = data.service === (name === "AI" ? "leetnote-ai" : "leetnote-api") && data.database === "ok"; }
+            catch { ready = false; }
+          }
+          resolve({ name, ready });
+        },
+        onerror: () => resolve({ name, ready: false }),
+        ontimeout: () => resolve({ name, ready: false }),
+      });
+    })));
+  }
+
+  async function startLeetNote() {
+    const button = $("start-leetnote");
+    if (button.disabled) return;
+    if (IS_DEMO) {
+      addMessage("assistant", "离线演示不会启动本机服务。实际使用前请按 README 安装 LeetNote 启动器。");
+      return;
+    }
+    if (!/^http:\/\/(?:127\.0\.0\.1|localhost):8080\/?$/i.test(leetnoteBase())) {
+      addMessage("assistant", "启动器仅用于本机默认端口的 LeetNote。当前配置不是本机 8080 地址，请在服务所在电脑启动。");
+      return;
+    }
+    button.disabled = true;
+    const note = addMessage("assistant", "已请求本机启动器。请允许浏览器打开外部应用；首次使用需按 README 安装启动器。正在检查服务…");
+    try {
+      const link = document.createElement("a");
+      link.href = "openleet-leetnote://start";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      const deadline = Date.now() + 120000;
+      let states;
+      do {
+        states = await probeLeetNoteServices();
+        if (states.every(service => service.ready)) {
+          note.textContent = "LeetNote 的 API / 数据库、AI 和网页服务已就绪。Redis 为可选服务。现在可以点击「存入 LeetNote」。";
+          return;
+        }
+        note.textContent = "等待 LeetNote 启动：" + states.map(service => service.name + (service.ready ? " ✓" : " 等待中")).join("；");
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      } while (Date.now() < deadline);
+      note.textContent = "未能确认全部服务就绪：" + states.filter(service => !service.ready).map(service => service.name).join("、") + "。请确认已安装启动器并允许打开外部应用，或手动运行 LeetNote 的 start-all.ps1；详细日志见本机 TEMP 下的 leetnote-logs。";
+    } catch (error) {
+      note.textContent = "无法启动 LeetNote：" + error.message + "。请按 README 检查本机启动器。";
+    } finally {
+      button.disabled = false;
+    }
+  }
+
   const DIFFICULTY_MAP = { 简单: "Easy", 中等: "Medium", 困难: "Hard" };
 
   function normalizeDifficulty(raw) {
@@ -1113,7 +1268,7 @@
       return;
     }
 
-    const problem = readProblem();
+    const problem = { ...readProblem(), ...readCode() };
     if (!problem.slug) {
       addMessage("assistant", "没识别到当前题目（slug 为空），请在题目页使用。");
       return;
@@ -1192,8 +1347,10 @@
     inputEl.placeholder = SKILLS[cfg.mode].placeholder;
     $("tip").textContent = SKILLS[cfg.mode].tip;
     $("read").disabled = cfg.mode === "knowledge";
-    $("read").title = cfg.mode === "knowledge" ? "知识点模式可直接提问，无需读取题目" : "读取当前题目和编辑器代码";
+    $("read").title = cfg.mode === "knowledge" ? "知识点模式无需题目，可单独读取当前代码" : "只读取题目标题、描述、难度和标签";
+    $("read-code").title = "只读取当前编辑器代码；启用发送代码时附带到 AI 请求";
     problemEl.hidden = true;
+    renderCodeChip(cfg.mode === "knowledge" && !codeRequested ? null : latestCodeContext);
   }
 
   function fillModels(models) {
@@ -1232,6 +1389,7 @@
   launcher.addEventListener("click", () => {
     syncConversation();
     panel.hidden = !panel.hidden;
+    restorePanelPosition();
     if (!panel.hidden && cfg.autoRead && cfg.mode !== "knowledge") {
       const problem = readProblem();
       renderProblemChip(problem);
@@ -1241,17 +1399,11 @@
   $("settings").addEventListener("click", () => (settingsBox.hidden = !settingsBox.hidden));
   $("send").addEventListener("click", onSend);
   $("import").addEventListener("click", importToLeetNote);
+  $("start-leetnote").addEventListener("click", startLeetNote);
   $("clear").title = "清除本题已保存的对话和草稿";
   $("clear").addEventListener("click", clearConversation);
-  $("read").addEventListener("click", () => {
-    syncConversation();
-    const problem = readProblem();
-    renderProblemChip(problem);
-    const codeStatus = problem.codeSource === "model"
-      ? (problem.code.trim() ? "已更新当前编辑器代码。" : "当前编辑器代码为空。")
-      : (problem.code ? "只读到了编辑器可见的代码片段，可能不完整；可以手动粘贴完整代码。" : "没读到编辑器代码，可以手动贴给我。");
-    addMessage("assistant", `已读取题目 **${problem.title || "(未识别)"}**。${codeStatus}`);
-  });
+  $("read").addEventListener("click", onReadProblem);
+  $("read-code").addEventListener("click", onReadCode);
   inputEl.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
@@ -1301,6 +1453,7 @@
   includeCodeEl.addEventListener("change", () => {
     cfg.includeCode = includeCodeEl.checked;
     saveCfg();
+    renderCodeChip(cfg.mode === "knowledge" && !codeRequested ? null : latestCodeContext);
   });
   autoReadEl.addEventListener("change", () => {
     cfg.autoRead = autoReadEl.checked;

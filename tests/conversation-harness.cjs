@@ -24,9 +24,10 @@ function setup(saved = new Map(), options = {}) {
     window: { addEventListener: (name, fn) => { windowEvents[name] = fn; } },
     document: { hidden: false, addEventListener: (name, fn) => { documentEvents[name] = fn; } },
     inputEl: { value: '', addEventListener: (name, fn) => { inputEvents[name] = fn; } },
-    sendBtn: {}, chatStatusEl: {}, problemEl: {},
+    sendBtn: {}, chatStatusEl: {}, problemEl: {}, codeStatusEl: {},
     cfg: { mode: 'hint', model: 'test', includeCode: true },
-    readProblem: () => ({ title: 'Problem', code: 'CURRENT_CODE', codeSource: 'model' }),
+    readProblem: () => ({ title: 'Problem' }),
+    readCode: () => ({ code: 'CURRENT_CODE', codeSource: 'model' }),
     resetMessages: () => { rendered.length = 0; },
     addMessage: (role, content) => { rendered.push({ role, content }); },
     renderProblemChip() {}, setStatus() {},
@@ -39,8 +40,10 @@ function setup(saved = new Map(), options = {}) {
   });
   vm.runInContext(source.slice(source.indexOf('  const store ='), source.indexOf('  /* ----------------------------------------------------------------- config */')), context);
   vm.runInContext(source.slice(source.indexOf('  function currentSlug()'), source.indexOf('  function readProblem()')), context);
+  vm.runInContext(source.slice(source.indexOf('  function readChatContext('), source.indexOf('  /* ------------------------------------------------------------- upstream API */')), context);
   vm.runInContext(source.slice(source.indexOf('  const BASE_SYSTEM ='), source.indexOf('  /* ---------------------------------------------------------------- markdown */')), context);
   installConversation(context);
+  vm.runInContext(source.slice(source.indexOf('  function renderCodeChip('), source.indexOf('  const WELCOME =')), context);
   vm.runInContext(source.slice(source.indexOf('  function buildSystem('), source.indexOf('  /* ---------------------------------------------------------- LeetNote export */')), context);
   vm.runInContext(source.slice(source.indexOf('  inputEl.addEventListener("input"'), source.indexOf('  apiKeyInput.addEventListener')), context);
   context.syncConversation(true);
