@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.6.1
-// @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / Python 知识点。纯前端，直接用你自己的 API key。
+// @version      2.7.0
+// @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / 代码批注 / Python 知识点。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
 // @match        https://leetcode.cn/problems/*
@@ -35,11 +35,12 @@
  * 浏览器拦；油猴的 GM_xmlhttpRequest 在扩展层发请求，可绕过 CORS。API key 存在
  * 油猴自己的存储里（GM_setValue），不写进页面、只发给你配置的那个端点。
  *
- * 四种 skill：
+ * 五种 skill：
  *   hint    分步提示（Socratic）
  *   explain 讲代码 + 复杂度
  *   debug   Debug 报错
  *   knowledge Python 语法与知识点
+ *   annotate  当前代码批注、提示与错误定位
  *
  * 注意：必须通过 Tampermonkey 安装。若检测不到 GM_xmlhttpRequest（例如被当作普通
  * 网页脚本加载），会退回 fetch —— 那样会因 CORS 失败。
@@ -200,7 +201,7 @@
     "- 代码放进 Markdown 代码块；行内术语用反引号；公式尽量用简单文字或反引号。",
     "- 回复显示在小窗口：默认正文不超过 180 个汉字，最多 3 个短要点；先说结论，不写开场白、总结、重复追问或大段标题。此前回复即使很长，也按此简短规则回答。",
     "- 只讲当前问题涉及的 1–2 个核心考点，结合用户代码说明它们在本题中的作用；不要复述题目、逐行讲解或扩展无关知识。",
-    "- 仅在必要时给一个最小代码片段，默认不超过 8 行，不重复粘贴用户代码。用户明确要求详细解释或完整解法时，才按需放宽长度。",
+    "- 仅在必要时给一个最小代码片段，默认不超过 8 行，不重复粘贴用户代码。用户明确要求详细解释、完整解法或使用代码批注模式时，才按需放宽代码长度。",
   ].join("\n");
 
   const SKILLS = {
@@ -241,6 +242,22 @@
         "- 只说明最可能的根因、相关易错知识点和最小修改（尽量只改必要的几行）。",
         "- 缺少定位依据时，只询问一项最关键的信息，不罗列猜测和检查清单。",
         "- 不要顺手重写整个解法。",
+      ].join("\n"),
+    },
+    annotate: {
+      label: "代码批注",
+      tip: "给当前代码加注释、提示和错误标记，可复制结果。",
+      placeholder: "可直接点发送批注当前代码，或说明重点：边界条件、循环逻辑…",
+      quick: "请给当前编辑器代码添加简短注释，标出关键知识点、提示和可能的错误。",
+      system: [
+        "模式：代码批注。",
+        "- 批注对象只取本次系统消息中的用户当前代码，不能使用历史对话中的旧代码或其他解法替代。",
+        "- 输出完整的带批注代码，允许超过默认 8 行限制；保留原代码、缩进、变量名和已有注释，只新增符合当前语言语法的注释，不修复或重写代码。",
+        "- 在相关代码行上方添加简短注释，使用【知识点】、【提示】、【错误】或【待确认】标记。默认只批注最关键的 3–5 处，不逐行翻译；没有必要时可以更少。",
+        "- 围绕题目考察点说明代码的作用。确定的错误才标【错误】，简要说明触发条件或反例；无法确认时标【待确认】，不要编造报错、约束或运行结果。",
+        "- 提示只指出下一步修改方向，不直接提供替代解法。没有发现明确错误就不要硬加错误标记。",
+        "- 注释放在完整语句外，不插入字符串、多行字面量、续行表达式或其他会改变语法/语义的位置。",
+        "- 只输出一个带对应语言标记的 Markdown 代码块，代码块外最多补一句必要说明。",
       ].join("\n"),
     },
     knowledge: {
@@ -1090,7 +1107,7 @@
   async function onSend() {
     // Capture what the user chose to send before a pending SPA switch restores
     // the destination problem's draft.
-    const text = inputEl.value.trim();
+    const text = inputEl.value.trim() || (cfg.mode === "annotate" ? SKILLS.annotate.quick : "");
     syncConversation();
     if (busy) return;
     if (!text) return;
@@ -1109,6 +1126,12 @@
     saveConversation();
     try {
       const problem = readChatContext(cfg.mode);
+      if (cfg.mode === "annotate") {
+        if (!cfg.includeCode) throw new Error("代码批注需要读取当前代码，请先在设置中启用「把当前编辑器里的代码发给模型」。");
+        if (!problem.code || !problem.code.trim()) throw new Error("没有读取到当前代码，请先在题目编辑器中写入代码，再重试批注。");
+        if (problem.codeIncomplete) throw new Error("当前只读取到代码片段，暂不能生成完整批注。请确认编辑器完整代码可读取后重试。");
+        if (problem.code.length > 8000) throw new Error("当前代码超过 8,000 字符，超出完整批注上限。请缩短代码后重试，或使用讲代码模式询问局部逻辑。");
+      }
       renderProblemChip(problem);
       latestCodeContext = problem.codeSource ? problem : null;
       renderCodeChip(latestCodeContext);

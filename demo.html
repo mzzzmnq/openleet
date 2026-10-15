@@ -132,10 +132,14 @@
           }
 
           // Emit a fake SSE stream: a little reasoning, then the answer in chunks.
-          const isKnowledge = JSON.parse(opts.data).messages[0].content.includes("模式：Python 知识点");
-          const reply = isKnowledge ? PYTHON_REPLY : REPLY;
+          const system = JSON.parse(opts.data).messages[0].content;
+          const isKnowledge = system.includes("模式：Python 知识点");
+          const isAnnotation = system.includes("模式：代码批注");
+          const reply = isAnnotation
+            ? "```cpp\n// 【提示】这是离线批注演示，未实际分析代码。\n" + document.getElementById("demo-code").value + "\n```"
+            : isKnowledge ? PYTHON_REPLY : REPLY;
           const events = [
-            { choices: [{ delta: { reasoning_content: isKnowledge ? "使用最小示例解释 Python 切片。" : "用户问的是两数之和的最优解法。" } }] },
+            { choices: [{ delta: { reasoning_content: isAnnotation ? "展示当前代码的批注样式。" : isKnowledge ? "使用最小示例解释 Python 切片。" : "用户问的是两数之和的最优解法。" } }] },
             { choices: [{ delta: { content: reply.slice(0, 30) } }] },
             { choices: [{ delta: { content: reply.slice(30, 120) } }] },
             { choices: [{ delta: { content: reply.slice(120) } }] },
