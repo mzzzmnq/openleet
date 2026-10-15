@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.8.0
+// @version      2.8.1
 // @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / 代码批注 / Python 知识点。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -1275,7 +1275,7 @@
       document.body.appendChild(link);
       link.click();
       link.remove();
-      const deadline = Date.now() + 120000;
+      const deadline = Date.now() + 240000;
       let states;
       do {
         states = await probeLeetNoteServices();
@@ -1283,10 +1283,10 @@
           note.textContent = "LeetNote 的 API / 数据库、AI 和网页服务已就绪。Redis 为可选服务。现在可以点击「存入 LeetNote」。";
           return;
         }
-        note.textContent = "等待 LeetNote 启动：" + states.map(service => service.name + (service.ready ? " ✓" : " 等待中")).join("；");
+        note.textContent = "等待 LeetNote 启动：" + states.map(service => service.name + (service.ready ? " ✓" : " 等待中")).join("；") + "。数据库恢复时会先等待其就绪，请勿重复点击（最多等待 4 分钟）。";
         await new Promise(resolve => setTimeout(resolve, 2000));
       } while (Date.now() < deadline);
-      note.textContent = "未能确认全部服务就绪：" + states.filter(service => !service.ready).map(service => service.name).join("、") + "。请确认已安装启动器并允许打开外部应用，或手动运行 LeetNote 的 start-all.ps1；详细日志见本机 TEMP 下的 leetnote-logs。";
+      note.textContent = "未能确认全部服务就绪：" + states.filter(service => !service.ready).map(service => service.name).join("、") + "。请确认本机 openleet 的 scripts 目录也已更新，并允许浏览器打开外部应用。排查日志：%TEMP%\\openleet-leetnote.start.err.log 和 %TEMP%\\openleet-leetnote.start.out.log。";
     } catch (error) {
       note.textContent = "无法启动 LeetNote：" + error.message + "。请按 README 检查本机启动器。";
     } finally {

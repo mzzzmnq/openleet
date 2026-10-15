@@ -9,6 +9,7 @@ const repo = path.resolve(__dirname, '..');
 const library = path.join(repo, 'scripts', 'leetnote-launcher-lib.ps1');
 const handler = path.join(repo, 'scripts', 'leetnote-launcher.ps1');
 const installer = path.join(repo, 'scripts', 'install-leetnote-launcher.ps1');
+const startupWrapper = path.join(repo, 'scripts', 'start-leetnote-services.ps1');
 const quote = value => `'${value.replace(/'/g, "''")}'`;
 const windows = process.platform === 'win32';
 const powershell = windows && ['pwsh.exe', 'powershell.exe'].find(executable => {
@@ -58,6 +59,7 @@ function Remove-Item {
   }
 }
 function Write-OpenLeetLauncherLog { param([string]$Message) $global:logs += $Message }
+function Get-OpenLeetLauncherMutexName { return "Local\\openleet-launcher-unit-test-$PID" }
 function Start-Process {
   [CmdletBinding()] param([string]$FilePath, [string[]]$ArgumentList, [string]$WorkingDirectory, [string]$WindowStyle,
     [switch]$Wait, [switch]$PassThru, [string]$RedirectStandardOutput, [string]$RedirectStandardError)
@@ -89,6 +91,7 @@ function withProject(callback) {
   fs.mkdirSync(path.join(project, 'scripts'), { recursive: true });
   fs.writeFileSync(path.join(project, 'start-all.ps1'), "throw 'Fixture must never execute.'");
   fs.writeFileSync(path.join(project, 'scripts', 'services.ps1'), '# fixture');
+  fs.writeFileSync(path.join(project, 'scripts', 'postgres.ps1'), '# fixture');
   try { return callback(project, temporary); }
   finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 }
@@ -128,14 +131,14 @@ test('launcher rejects commands, query parameters, paths, and unknown actions be
   assert.equal(result.LaunchCount, 0);
 }));
 
-test('fixed launch uses start-all.ps1 -Quiet, hidden window, and waits only for the wrapper', options, () => withProject(project => {
+test('fixed launch passes the registered project to the hidden readiness wrapper and waits only for it', options, () => withProject(project => {
   const result = runPowerShell(`${setup(project)}
     $status=Invoke-OpenLeetLeetNoteLaunch -LaunchUri 'openleet-leetnote://start/'
     @{ Status=$status; Launches=@($global:launches); WaitCalls=$global:waitCalls } | ConvertTo-Json -Compress -Depth 5`);
   assert.equal(result.Status, 'started');
   assert.equal(result.Launches.length, 1);
   const launch = result.Launches[0];
-  assert.deepEqual(launch.Arguments, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', `"${path.join(project, 'start-all.ps1')}"`, '-Quiet']);
+  assert.deepEqual(launch.Arguments, ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', `"${startupWrapper}"`, '-LeetNotePath', `"${project}"`]);
   assert.equal(launch.WorkingDirectory, project);
   assert.equal(launch.WindowStyle, 'Hidden');
   assert.equal(launch.Wait, false);
@@ -243,3 +246,85 @@ test('a second process skips startup while the first holds the launch mutex', op
   assert.equal(result.Status, 'already-starting');
   assert.equal(result.LaunchCount, 0);
 });
+
+// The project fixture defines its own PostgreSQL helpers and start-all script.
+// No real PostgreSQL command, database, or LeetNote service is reached.
+function withStartupProject(callback) {
+  return withProject(project => {
+    fs.writeFileSync(path.join(project, 'scripts', 'postgres.ps1'), `
+function Test-LeetNotePostgresReady {
+  $global:startupEvents += 'check-postgres'
+  return $global:postgresInitiallyReady
+}
+function Start-LeetNotePostgres {
+  param([int]$TimeoutSeconds)
+  $global:startupEvents += 'start-postgres'
+  $global:postgresTimeout = $TimeoutSeconds
+  Write-Host 'Simulated database startup/recovery.'
+  if ($global:postgresThrows) { throw 'Simulated database failure.' }
+  return $global:postgresStartResult
+}
+`);
+    fs.writeFileSync(path.join(project, 'start-all.ps1'), `
+param([switch]$Quiet)
+$global:startupEvents += 'start-all'
+$global:startAllCalls++
+$global:startAllQuiet = [bool]$Quiet
+`);
+    return callback(project);
+  });
+}
+
+function runStartupWrapper(project, initiallyReady, startResult, throws = false) {
+  return runPowerShell(`
+    $global:startupEvents=@()
+    $global:postgresInitiallyReady=$${initiallyReady}
+    $global:postgresStartResult=$${startResult}
+    $global:postgresThrows=$${throws}
+    $global:postgresTimeout=0
+    $global:startAllCalls=0
+    $global:startAllQuiet=$false
+    $failure=''
+    try { & ${quote(startupWrapper)} -LeetNotePath ${quote(project)} }
+    catch { $failure=$_.Exception.Message }
+    @{ Events=@($global:startupEvents); Timeout=$global:postgresTimeout; StartAllCalls=$global:startAllCalls;
+      Quiet=$global:startAllQuiet; Failure=$failure; NativeLaunches=$global:launches.Count } | ConvertTo-Json -Compress
+  `);
+}
+
+test('startup wrapper proceeds directly when PostgreSQL is already ready', options, () => withStartupProject(project => {
+  const result = runStartupWrapper(project, true, false);
+  assert.deepEqual(result.Events, ['check-postgres', 'start-all']);
+  assert.equal(result.Timeout, 0);
+  assert.equal(result.StartAllCalls, 1);
+  assert.equal(result.Quiet, true);
+  assert.equal(result.Failure, '');
+  assert.equal(result.NativeLaunches, 0);
+}));
+
+test('startup wrapper allows 120 seconds for recovery before starting dependent services', options, () => withStartupProject(project => {
+  const result = runStartupWrapper(project, false, true);
+  assert.deepEqual(result.Events, ['check-postgres', 'start-postgres', 'start-all']);
+  assert.equal(result.Timeout, 120);
+  assert.equal(result.StartAllCalls, 1);
+  assert.equal(result.Quiet, true);
+  assert.equal(result.Failure, '');
+  assert.equal(result.NativeLaunches, 0);
+}));
+
+test('startup wrapper fails on database timeout without starting dependent services', options, () => withStartupProject(project => {
+  const result = runStartupWrapper(project, false, false);
+  assert.deepEqual(result.Events, ['check-postgres', 'start-postgres']);
+  assert.equal(result.Timeout, 120);
+  assert.equal(result.StartAllCalls, 0);
+  assert.match(result.Failure, /PostgreSQL did not become ready within 120 seconds/);
+  assert.equal(result.NativeLaunches, 0);
+}));
+
+test('startup wrapper propagates database startup errors without calling start-all', options, () => withStartupProject(project => {
+  const result = runStartupWrapper(project, false, false, true);
+  assert.deepEqual(result.Events, ['check-postgres', 'start-postgres']);
+  assert.equal(result.StartAllCalls, 0);
+  assert.match(result.Failure, /Simulated database failure/);
+  assert.equal(result.NativeLaunches, 0);
+}));

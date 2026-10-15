@@ -13,7 +13,7 @@ function Resolve-OpenLeetLeetNotePath {
         throw 'LeetNotePath must be a filesystem directory.'
     }
     $root = $item.FullName
-    foreach ($relative in @('start-all.ps1', 'scripts\services.ps1')) {
+    foreach ($relative in @('start-all.ps1', 'scripts\services.ps1', 'scripts\postgres.ps1')) {
         if (-not (Test-Path -LiteralPath (Join-Path $root $relative) -PathType Leaf)) {
             throw "LeetNotePath does not contain the expected $relative."
         }
@@ -119,8 +119,11 @@ function Invoke-OpenLeetLeetNoteLaunch {
         $registration = Get-OpenLeetLauncherRegistration
         if (-not $registration) { throw 'The launcher is not installed for this user.' }
         $root = Resolve-OpenLeetLeetNotePath -LeetNotePath $registration.LeetNotePath
-        $startScript = Join-Path $root 'start-all.ps1'
-        $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $startScript), '-Quiet')
+        $startScript = Join-Path $PSScriptRoot 'start-leetnote-services.ps1'
+        # Native Windows argument parsing requires a trailing backslash before
+        # a closing quote to be doubled (including a project at a drive root).
+        $quotedRoot = '"' + ($root -replace '(\\+)$', '$1$1') + '"'
+        $arguments = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $startScript), '-LeetNotePath', $quotedRoot)
         Write-OpenLeetLauncherLog -Message "Starting services in $root"
         # Wait for the wrapper only, so concurrent protocol invocations cannot
         # race its port checks. start-all.ps1 detaches the actual services.
@@ -132,7 +135,7 @@ function Invoke-OpenLeetLeetNoteLaunch {
         # services. Process.WaitForExit waits only for the wrapper process.
         $process.WaitForExit()
         if ($process.ExitCode -ne 0) {
-            throw "start-all.ps1 exited with code $($process.ExitCode). See $(Get-OpenLeetLauncherLogPath -Kind 'start.err')."
+            throw "start-leetnote-services.ps1 exited with code $($process.ExitCode). See $(Get-OpenLeetLauncherLogPath -Kind 'start.err')."
         }
         # The browser checks actual HTTP readiness; start-all.ps1's successful
         # exit alone does not prove all services reached a healthy state.

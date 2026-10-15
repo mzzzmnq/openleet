@@ -40,3 +40,27 @@ test('unrelated API response, network errors and timeouts are not ready', async 
   } });
   assert.ok((await h.context.probeLeetNoteServices()).every(s => !s.ready));
 });
+
+test('startup continues beyond two minutes and accepts services that become ready later', async () => {
+  let time = 0, calls = 0;
+  const h = setup({ Date: { now: () => time }, setTimeout: fn => { time += 130000; fn(); },
+    GM_xmlhttpRequest: request => {
+      calls++;
+      if (time === 0) request.onerror();
+      else request.onload({ status: 200, responseText: JSON.stringify({ service: request.url.includes(':8000') ? 'leetnote-ai' : 'leetnote-api', database: 'ok' }) });
+    },
+  });
+  await h.context.startLeetNote();
+  assert.equal(calls, 6);
+  assert.match(h.notes[0].textContent, /已就绪/);
+  assert.equal(h.button.disabled, false);
+});
+
+test('startup timeout identifies unavailable services and points to launcher logs', async () => {
+  let time = 0;
+  const h = setup({ Date: { now: () => time }, setTimeout: fn => { time += 250000; fn(); }, GM_xmlhttpRequest: request => request.onerror() });
+  await h.context.startLeetNote();
+  assert.match(h.notes[0].textContent, /未能确认全部服务就绪/);
+  assert.match(h.notes[0].textContent, /openleet-leetnote.start.err.log/);
+  assert.equal(h.button.disabled, false);
+});

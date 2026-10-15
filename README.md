@@ -2,7 +2,7 @@
 
 openleet 是一个运行在 Tampermonkey（油猴）中的用户脚本。它在 LeetCode 题目页右下角加入 AI 对话面板，读取当前题目和编辑器代码，帮助你获得提示、理解代码和排查错误。
 
-**无需部署后端，也不需要构建项目。** 安装脚本、配置自己的模型服务 API Key 即可使用。当前版本为 **2.8.0**，内置智谱 GLM 和 OpenCode Go 两个供应商入口，可选对接本机 LeetNote 保存笔记。
+**无需部署后端，也不需要构建项目。** 安装脚本、配置自己的模型服务 API Key 即可使用。当前版本为 **2.8.1**，内置智谱 GLM 和 OpenCode Go 两个供应商入口，可选对接本机 LeetNote 保存笔记。
 
 ## 目录
 
@@ -71,7 +71,7 @@ openleet 是一个运行在 Tampermonkey（油猴）中的用户脚本。它在 
 3. 找到 **openleet · 题目 AI 助手**，点击名称进入编辑页面。
 4. 全选旧代码，粘贴新代码，按 **Ctrl+S** 保存。
 5. 刷新已经打开的 LeetCode 题目页面。
-6. 如需确认版本，检查脚本头部的 `@version`，本版应为 `2.8.0`。
+6. 如需确认版本，检查脚本头部的 `@version`，本版应为 `2.8.1`。
 
 只替换同一脚本的源码，配置和 API Key 通常会保留。不要为了更新先删除原脚本；删除时清理脚本数据可能丢失设置。也不要同时启用多个 openleet 副本。
 
@@ -227,7 +227,9 @@ Authorization: Bearer <当前供应商的 API Key>
 
 ### 从助手启动本机全部服务（Windows）
 
-面板中的 **启动 LeetNote** 会调用本机启动器，执行 LeetNote 项目已有的 `start-all.ps1 -Quiet`。它会启动 PostgreSQL、可选的 Redis、Go API、AI 服务和网页，已运行的服务会跳过。启动不会自动导入笔记；看到就绪提示后，再点击 **存入 LeetNote**。
+面板中的 **启动 LeetNote** 会调用本机启动器，先通过 LeetNote 的 PostgreSQL 启动函数等待数据库能够接受连接（最多 120 秒），成功后再执行项目已有的 `start-all.ps1 -Quiet`。数据库未就绪时会停止后续启动并记录错误，避免数据库仍在恢复时 API 提前启动失败。它会启动 PostgreSQL、可选的 Redis、Go API、AI 服务和网页，已运行的服务会跳过。启动不会自动导入笔记；看到就绪提示后，再点击 **存入 LeetNote**。
+
+**从旧版升级启动器时，除了更新油猴脚本，还需更新本机 openleet 仓库的整个 `scripts/` 目录（例如在该目录运行 `git pull`）。** 只更新油猴脚本不会更新 Windows 本机启动逻辑。项目路径未变时无需重新注册协议。
 
 首次需要在本机安装一次启动器。在 openleet 目录运行（将路径换成你的 LeetNote 项目）：
 
@@ -241,7 +243,7 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-leetnote-launche
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-leetnote-launcher.ps1 -Uninstall
 ```
 
-点击启动时，浏览器可能要求允许打开外部应用。助手最多等待两分钟，检查默认端口的 API / 数据库（8080）、AI（8000）和网页（5173）。Redis 为可选服务，不属于页面就绪判断。服务日志位于 `%TEMP%\leetnote-logs`，启动器日志位于 `%TEMP%\openleet-leetnote.launcher.log`，启动输出和错误分别为 `%TEMP%\openleet-leetnote.start.out.log`、`%TEMP%\openleet-leetnote.start.err.log`。未安装启动器、取消浏览器提示或服务启动失败时，会提示超时；可手动执行 LeetNote 的 `start-all.ps1` 排查。
+点击启动时，浏览器可能要求允许打开外部应用。助手最多等待四分钟，检查默认端口的 API / 数据库（8080）、AI（8000）和网页（5173）。Redis 为可选服务，不属于页面就绪判断。服务日志位于 `%TEMP%\leetnote-logs`，启动器日志位于 `%TEMP%\openleet-leetnote.launcher.log`，启动输出和错误分别为 `%TEMP%\openleet-leetnote.start.out.log`、`%TEMP%\openleet-leetnote.start.err.log`。未安装启动器、取消浏览器提示或服务启动失败时，会提示超时；请按提示检查对应服务和启动器日志。
 
 此按钮适用于默认端口的本机部署。远程服务器、Docker 或自定义端口仍需使用对应部署的启动方式；AI 对话本身不需要安装启动器。
 
@@ -381,6 +383,11 @@ git diff --check
 - 自定义接口的凭据隔离、模型维护和完整性提示仍有改进空间。
 
 ## 版本记录
+
+### 2.8.1
+
+- 修复数据库恢复较慢时 API 过早启动失败：先等待数据库就绪，再启动其余服务。
+- 页面等待延长至四分钟，失败提示列出本机启动器日志位置；本次修复需同步更新本机 `scripts/`。
 
 ### 2.8.0
 
