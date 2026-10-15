@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         openleet · 题目 AI 助手
 // @namespace    opencode-leet
-// @version      2.7.0
+// @version      2.8.0
 // @description  在 LeetCode 题目页嵌入 AI 对话面板：分步提示 / 讲代码+复杂度 / Debug 报错 / 代码批注 / Python 知识点。纯前端，直接用你自己的 API key。
 // @author       opencode-leet
 // @match        https://leetcode.com/problems/*
@@ -121,6 +121,7 @@
     includeCode: true,
     autoRead: true,
     mode: "hint",
+    fontSize: 14,
     // 每个供应商各存一把 key —— 切换供应商时不会把 A 家的 key 发到 B 家
     keys: { zhipu: "", opencode: "" },
     // ---- 导出到 LeetNote ----
@@ -633,10 +634,12 @@
   background:linear-gradient(135deg,#5b7cfa,#8a5cf6);color:#fff;font:600 14px/1 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif;
   box-shadow:0 10px 26px rgba(70,90,220,.4);transition:transform .12s ease,filter .12s ease}
 .ocleet-launcher:hover{filter:brightness(1.08);transform:translateY(-1px)}
-.ocleet-panel{position:fixed;right:22px;bottom:78px;z-index:2147483000;width:420px;max-width:calc(100vw - 32px);height:min(78vh,780px);display:flex;flex-direction:column;
+.ocleet-panel{position:fixed;right:12px;bottom:78px;z-index:2147483000;width:440px;max-width:calc(100% - 24px);height:min(82vh,820px);display:flex;flex-direction:column;
   background:#12141c;color:#e7e9f0;border:1px solid rgba(255,255,255,.1);border-radius:16px;overflow:hidden;
   box-shadow:0 22px 70px rgba(0,0,0,.55);font:13px/1.6 -apple-system,"Segoe UI",Roboto,"PingFang SC","Microsoft YaHei",sans-serif}
 .ocleet-panel[hidden]{display:none}
+.ocleet-panel,.ocleet-panel *{box-sizing:border-box}
+.ocleet-panel> *:not(.ocleet-messages){flex-shrink:0}
 .ocleet-head{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);cursor:grab;touch-action:none;user-select:none}
 .ocleet-head.ocleet-dragging{cursor:grabbing}
 .ocleet-brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13.5px}
@@ -646,49 +649,62 @@
 .ocleet-actions{display:flex;gap:4px}
 .ocleet-icon{background:transparent;border:none;color:#9aa0b4;cursor:pointer;font-size:15px;padding:4px 7px;border-radius:8px}
 .ocleet-icon:hover{background:rgba(255,255,255,.08);color:#fff}
-.ocleet-settings{padding:10px 12px;border-bottom:1px solid rgba(255,255,255,.08);background:rgba(255,255,255,.02);display:flex;flex-direction:column;gap:8px}
+.ocleet-settings{position:absolute;inset:48px 8px 8px;z-index:2;padding:14px;border:1px solid rgba(255,255,255,.14);border-radius:12px;background:#191c28;overflow-y:auto;display:flex;flex-direction:column;gap:12px;box-shadow:0 12px 32px #0008}
 .ocleet-settings[hidden]{display:none}
 .ocleet-field{display:flex;flex-direction:column;gap:4px;font-size:12px;color:#9aa0b4}
 .ocleet-field input,.ocleet-field select{background:#0c0e15;border:1px solid rgba(255,255,255,.12);border-radius:8px;color:#e7e9f0;padding:6px 8px;font:inherit;font-size:12.5px}
 .ocleet-check{display:flex;align-items:center;gap:8px;font-size:12.5px;color:#c3c7d4}
-.ocleet-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;padding:9px 12px 0}
-.ocleet-tab{flex:1;padding:7px 8px;border:1px solid rgba(255,255,255,.1);background:rgba(255,255,255,.03);color:#aeb3c4;border-radius:9px;cursor:pointer;font:600 12px/1.2 inherit}
-.ocleet-tab.active{background:linear-gradient(135deg,rgba(91,124,250,.3),rgba(138,92,246,.3));border-color:rgba(138,120,255,.55);color:#fff}
+.ocleet-mode-row{display:flex;align-items:center;gap:10px;padding:10px 12px 6px}
+.ocleet-mode-row label{font-size:12px;color:#9aa0b4;flex-shrink:0}
+.ocleet-mode-select{min-width:0;flex:1;background:#202438;color:#e7e9f0;border:1px solid #454d73;border-radius:8px;padding:7px 9px;font:inherit;font-size:13px}
+.ocleet-context{margin:0 12px;border-bottom:1px solid #ffffff12;padding-bottom:8px;max-height:30vh;overflow-y:auto}
+.ocleet-context summary,.ocleet-note-tools summary{cursor:pointer;color:#aeb3c4;font-size:12px;padding:5px 0}
+.ocleet-context .ocleet-problem{margin:6px 0 0}
+.ocleet-font-controls{display:flex;align-items:center;border:1px solid #ffffff18;border-radius:8px;margin-right:5px}
+.ocleet-font-controls button{font-size:12px;min-width:28px;min-height:28px}
+.ocleet-font-controls output{font-size:11px;color:#b9bed0;min-width:28px;text-align:center}
+.ocleet-icon:disabled{opacity:.35;cursor:default}
+.ocleet-panel :is(button,select,summary,input,textarea):focus-visible{outline:2px solid #9b90ff;outline-offset:2px}
+.ocleet-settings-title{display:flex;justify-content:space-between;align-items:center;font-weight:600}
+.ocleet-note-tools{position:relative}
+.ocleet-note-menu{position:absolute;bottom:32px;left:0;z-index:1;display:flex;flex-direction:column;gap:8px;padding:10px;min-width:150px;background:#202330;border:1px solid #ffffff25;border-radius:10px;box-shadow:0 8px 25px #0006}
 .ocleet-problem{margin:9px 12px 0;padding:7px 10px;border-radius:9px;background:rgba(91,124,250,.1);border:1px solid rgba(91,124,250,.25);font-size:12px;color:#c9cfe4;display:flex;gap:6px;align-items:center}
 .ocleet-problem[hidden]{display:none}
 .ocleet-diff{font-size:11px;padding:1px 6px;border-radius:6px;background:rgba(255,255,255,.1)}
-.ocleet-messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:10px}
+.ocleet-messages{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px;display:flex;flex-direction:column;gap:12px;font-size:var(--ocleet-font-size,14px)}
+.ocleet-messages>*{flex-shrink:0}
 .ocleet-msg{max-width:100%;padding:9px 11px;border-radius:12px;white-space:normal;word-break:break-word}
 .ocleet-msg.user{align-self:flex-end;background:linear-gradient(135deg,#5b7cfa,#7b5cf5);color:#fff;border-bottom-right-radius:4px}
 .ocleet-msg.assistant{align-self:flex-start;background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08);border-bottom-left-radius:4px}
 .ocleet-msg.error{align-self:flex-start;background:rgba(255,95,109,.12);border:1px solid rgba(255,95,109,.35);color:#ffc4ca}
 .ocleet-msg p{margin:0 0 7px}.ocleet-msg p:last-child{margin-bottom:0}
 .ocleet-msg ul{margin:4px 0 7px;padding-left:20px}
-.ocleet-msg h2,.ocleet-msg h3,.ocleet-msg h4{margin:8px 0 5px;font-size:13.5px}
-.ocleet-ic{background:rgba(255,255,255,.12);padding:1px 5px;border-radius:5px;font-family:ui-monospace,Consolas,monospace;font-size:12px}
+.ocleet-msg h2,.ocleet-msg h3,.ocleet-msg h4{margin:8px 0 5px;font-size:1em}
+.ocleet-ic{background:rgba(255,255,255,.12);padding:1px 5px;border-radius:5px;font-family:ui-monospace,Consolas,monospace;font-size:.95em}
 .ocleet-pre{position:relative;background:#0a0b11;border:1px solid rgba(255,255,255,.1);border-radius:9px;padding:9px 10px;overflow-x:auto;margin:5px 0}
-.ocleet-pre code{font-family:ui-monospace,Consolas,monospace;font-size:12px;white-space:pre}
+.ocleet-pre code{font-family:ui-monospace,Consolas,monospace;font-size:var(--ocleet-font-size,14px);white-space:pre}
 .ocleet-copy{position:absolute;top:5px;right:5px;background:rgba(255,255,255,.1);border:none;color:#c3c7d4;border-radius:6px;font-size:11px;padding:2px 7px;cursor:pointer}
 .ocleet-copy:hover{background:rgba(255,255,255,.2);color:#fff}
 .ocleet-reason{margin-bottom:7px;border-left:2px solid rgba(255,255,255,.18);padding-left:8px}
 .ocleet-reason summary{cursor:pointer;color:#8f95a8;font-size:11.5px;outline:none}
-.ocleet-reason-body{color:#8f95a8;font-size:12px;white-space:pre-wrap;margin-top:5px;max-height:200px;overflow:auto}
+.ocleet-reason-body{color:#8f95a8;font-size:1em;white-space:pre-wrap;margin-top:5px;max-height:200px;overflow:auto}
 .ocleet-muted{color:#8f95a8}
 .ocleet-composer{border-top:1px solid rgba(255,255,255,.08);padding:10px 12px 12px;background:rgba(255,255,255,.02)}
-.ocleet-composer textarea{width:100%;resize:vertical;min-height:56px;max-height:200px;background:#0c0e15;border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#e7e9f0;padding:9px 10px;font:inherit;font-size:13px}
+.ocleet-composer textarea{display:block;width:100%;resize:vertical;min-height:52px;max-height:min(160px,22vh);background:#0c0e15;border:1px solid rgba(255,255,255,.12);border-radius:10px;color:#e7e9f0;padding:9px 10px;font:inherit;font-size:var(--ocleet-font-size,14px)}
 .ocleet-composer textarea:focus{outline:none;border-color:rgba(138,120,255,.6)}
 .ocleet-composer-row{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px}
 .ocleet-hint{font-size:11.5px;color:#8f95a8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .ocleet-btns{display:flex;gap:6px;flex-shrink:0}
-.ocleet-context-actions{display:flex;gap:6px;margin-bottom:8px}
+.ocleet-context-actions{display:flex;gap:6px;margin-top:6px}
 .ocleet-context-actions .ocleet-btn{flex:1;min-width:0}
-.ocleet-btn{border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dfe2ec;padding:6px 11px;cursor:pointer;font:600 12.5px/1 inherit}
+.ocleet-btn{border-radius:9px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#dfe2ec;padding:8px 11px;cursor:pointer;font-family:inherit;font-size:12px;font-weight:600;line-height:1.3}
 .ocleet-btn:hover{background:rgba(255,255,255,.12)}
 .ocleet-btn:disabled{opacity:.5;cursor:not-allowed}
 .ocleet-btn.primary{background:linear-gradient(135deg,#5b7cfa,#8a5cf6);border-color:transparent;color:#fff}
 .ocleet-btn.primary[disabled]{opacity:.55;cursor:default}
 .ocleet-cursor{display:inline-block;width:7px;height:14px;background:#8a5cf6;vertical-align:-2px;animation:ocleet-blink 1s steps(2) infinite}
 @keyframes ocleet-blink{0%,50%{opacity:1}50.01%,100%{opacity:0}}
+@media(max-height:600px){.ocleet-panel{height:calc(100dvh - 24px);bottom:12px}.ocleet-composer{padding:8px 12px}.ocleet-mode-row{padding-top:6px}}
 `;
 
   /* ---------------------------------------------------------------------- UI */
@@ -708,11 +724,17 @@
     <div class="ocleet-head" data-ocleet="drag-handle" title="拖动标题栏移动窗口，双击恢复默认位置">
       <div class="ocleet-brand"><span class="ocleet-dot" data-ocleet="dot"></span><span>openleet</span></div>
       <div class="ocleet-actions">
+        <div class="ocleet-font-controls" role="group" aria-label="对话字号">
+          <button class="ocleet-icon" type="button" data-ocleet="font-decrease" aria-label="缩小字体" title="缩小字体">A−</button>
+          <output data-ocleet="font-size" aria-live="polite"></output>
+          <button class="ocleet-icon" type="button" data-ocleet="font-increase" aria-label="放大字体" title="放大字体">A+</button>
+        </div>
         <button class="ocleet-icon" type="button" data-ocleet="settings" title="设置">⚙</button>
         <button class="ocleet-icon" type="button" data-ocleet="close" title="关闭">✕</button>
       </div>
     </div>
     <div class="ocleet-settings" data-ocleet="settings-box" hidden>
+      <div class="ocleet-settings-title">设置<button class="ocleet-btn" type="button" data-ocleet="settings-done">完成</button></div>
       <label class="ocleet-field"><span>供应商</span><select data-ocleet="provider">
         <option value="zhipu">智谱 GLM（免费）</option>
         <option value="opencode">OpenCode Go</option>
@@ -726,23 +748,26 @@
       <label class="ocleet-field"><span>LeetNote 令牌（ln_…）</span><input type="password" data-ocleet="leetnote-token" placeholder="ln_…" autocomplete="off" /></label>
       <label class="ocleet-check"><input type="checkbox" data-ocleet="include-ai" /><span>导入时把最近一次 AI 讲解写进笔记正文</span></label>
     </div>
-    <div class="ocleet-tabs" data-ocleet="tabs"></div>
-    <div class="ocleet-problem" data-ocleet="problem" hidden></div>
-    <div class="ocleet-problem" data-ocleet="code-status" hidden></div>
-    <div class="ocleet-muted" data-ocleet="chat-status" style="padding:6px 12px 0;font-size:11px" aria-live="polite"></div>
-    <div class="ocleet-messages" data-ocleet="messages"></div>
-    <div class="ocleet-composer">
+    <div class="ocleet-mode-row"><label for="ocleet-mode">问答模式</label><select id="ocleet-mode" class="ocleet-mode-select" data-ocleet="tabs"></select></div>
+    <div class="ocleet-hint" data-ocleet="tip" style="padding:0 12px 6px"></div>
+    <details class="ocleet-context">
+      <summary>题目与代码</summary>
       <div class="ocleet-context-actions">
         <button class="ocleet-btn" type="button" data-ocleet="read">读取题目</button>
         <button class="ocleet-btn" type="button" data-ocleet="read-code">读取当前代码</button>
       </div>
-      <textarea data-ocleet="input" rows="3"></textarea>
-      <div class="ocleet-context-actions" style="margin-top:8px">
-        <button class="ocleet-btn" type="button" data-ocleet="start-leetnote" title="通过本机启动器启动 LeetNote 全部服务">启动 LeetNote</button>
-        <button class="ocleet-btn" type="button" data-ocleet="import">存入 LeetNote</button>
-      </div>
+      <div class="ocleet-problem" data-ocleet="problem" hidden></div>
+      <div class="ocleet-problem" data-ocleet="code-status" hidden></div>
+    </details>
+    <div class="ocleet-muted" data-ocleet="chat-status" style="padding:6px 12px 0;font-size:11px" aria-live="polite"></div>
+    <div class="ocleet-messages" data-ocleet="messages"></div>
+    <div class="ocleet-composer">
+      <textarea data-ocleet="input" rows="2" aria-label="消息"></textarea>
       <div class="ocleet-composer-row">
-        <span class="ocleet-hint" data-ocleet="tip"></span>
+        <details class="ocleet-note-tools" data-ocleet="note-tools"><summary>LeetNote</summary><div class="ocleet-note-menu">
+          <button class="ocleet-btn" type="button" data-ocleet="import">存入 LeetNote</button>
+          <button class="ocleet-btn" type="button" data-ocleet="start-leetnote" title="通过本机启动器启动 LeetNote 全部服务">启动 LeetNote</button>
+        </div></details>
         <div class="ocleet-btns">
           <button class="ocleet-btn" type="button" data-ocleet="clear">清空</button>
           <button class="ocleet-btn primary" type="button" data-ocleet="send">发送</button>
@@ -770,6 +795,20 @@
   const leetnoteUrlInput = $("leetnote-url");
   const leetnoteTokenInput = $("leetnote-token");
   const includeAiEl = $("include-ai");
+
+  /* ----------------------------------------------------------- reading size */
+  function applyFontSize(value, persist = false) {
+    const number = Number(value);
+    cfg.fontSize = Number.isFinite(number) && number > 0 ? Math.max(12, Math.min(22, Math.round(number))) : 14;
+    panel.style.setProperty("--ocleet-font-size", cfg.fontSize + "px");
+    $("font-size").textContent = cfg.fontSize;
+    $("font-decrease").disabled = cfg.fontSize <= 12;
+    $("font-increase").disabled = cfg.fontSize >= 22;
+    if (persist) saveCfg();
+  }
+  applyFontSize(cfg.fontSize);
+  $("font-decrease").addEventListener("click", () => applyFontSize(cfg.fontSize - 1, true));
+  $("font-increase").addEventListener("click", () => applyFontSize(cfg.fontSize + 1, true));
 
   /* -------------------------------------------------------- panel position */
   function setupPanelDrag(panel, handle) {
@@ -1071,7 +1110,7 @@
     addMessage("assistant", codeStatus + (cfg.includeCode ? "" : "设置中已关闭发送代码，启用后才会附带到 AI 请求。"));
   }
 
-  const WELCOME = "「读取题目」只读取题目信息，「读取当前代码」只读取编辑器内容。询问语法时可选择「Python 知识点」直接提问，或先读取代码再问。";
+  const WELCOME = "选择问答模式后直接提问。展开「题目与代码」可分别读取内容；顶部 A− / A+ 调整阅读字号。";
 
   function resetMessages() {
     messagesEl.textContent = "";
@@ -1357,19 +1396,12 @@
     if (!Object.hasOwn(SKILLS, cfg.mode)) cfg.mode = "hint";
     tabsEl.textContent = "";
     for (const [key, skill] of Object.entries(SKILLS)) {
-      const tab = document.createElement("button");
-      tab.className = `ocleet-tab${key === cfg.mode ? " active" : ""}`;
-      tab.type = "button";
+      const tab = document.createElement("option");
+      tab.value = key;
       tab.textContent = skill.label;
-      tab.addEventListener("click", () => {
-        cfg.mode = key;
-        saveCfg();
-        renderTabs();
-        inputEl.placeholder = skill.placeholder;
-        $("tip").textContent = skill.tip;
-      });
       tabsEl.appendChild(tab);
     }
+    tabsEl.value = cfg.mode;
     inputEl.placeholder = SKILLS[cfg.mode].placeholder;
     $("tip").textContent = SKILLS[cfg.mode].tip;
     $("read").disabled = cfg.mode === "knowledge";
@@ -1422,7 +1454,22 @@
     }
   });
   $("close").addEventListener("click", () => (panel.hidden = true));
-  $("settings").addEventListener("click", () => (settingsBox.hidden = !settingsBox.hidden));
+  $("settings").addEventListener("click", () => {
+    settingsBox.hidden = !settingsBox.hidden;
+    if (!settingsBox.hidden) $("settings-done").focus();
+  });
+  $("settings-done").addEventListener("click", () => { settingsBox.hidden = true; $("settings").focus(); });
+  tabsEl.addEventListener("change", () => {
+    cfg.mode = tabsEl.value;
+    saveCfg();
+    renderTabs();
+  });
+  panel.addEventListener("keydown", event => {
+    if (event.key === "Escape") {
+      if (!settingsBox.hidden) { settingsBox.hidden = true; $("settings").focus(); }
+      $("note-tools").open = false;
+    }
+  });
   $("send").addEventListener("click", onSend);
   $("import").addEventListener("click", importToLeetNote);
   $("start-leetnote").addEventListener("click", startLeetNote);

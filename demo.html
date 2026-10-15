@@ -159,8 +159,8 @@
           setTimeout(tick, 300);
         };
 
-        // Pre-seed a key so the script will attempt the (faked) request.
-        localStorage.setItem(
+        // Seed once; preserve preferences so reload can test saved UI settings.
+        if (!localStorage.getItem("gm:config")) localStorage.setItem(
           "gm:config",
           JSON.stringify({
             apiKey: "demo-offline-key",
